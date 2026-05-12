@@ -8,9 +8,9 @@ import type { PhotoBoothRPC } from "../bun/index";
 let utilityWindowKind: string | null = null;
 
 const rpc = Electroview.defineRPC<PhotoBoothRPC>({
-	// Picking a multi-megabyte model file + base64 round-trip is well over
-	// the 5-second default. Give it some breathing room.
-	maxRequestTime: 60_000,
+	// Model picks + recording chunk I/O + ffmpeg finalize can run for a long
+	// time on a local-first app; the default 1s Electrobun cap is far too low.
+	maxRequestTime: 1_800_000,
 	handlers: {
 		requests: {},
 		messages: {
@@ -66,12 +66,7 @@ async function toggleRecordingFromNativeMenu(): Promise<void> {
 	]);
 	const recording = studio.state.stream.recording || localRecorder.isRecording;
 	if (recording) {
-		try {
-			const result = await localRecorder.stop();
-			if (result.canceled) toast("Recording discarded", "info");
-		} catch (err) {
-			toast(`Stop failed: ${userMessageFor(err)}`, "error");
-		}
+		localRecorder.stop();
 		return;
 	}
 	try {

@@ -280,12 +280,7 @@ export class AppHeader extends Component<State> {
 				openGoLiveFailedDialog(detail);
 			}
 		} else {
-			try {
-				await egressController.stop();
-			} catch (err) {
-				console.warn("[egress] stop failed", err);
-			}
-			studio.setStream({ live: false });
+			egressController.stop();
 			toast("Stream stopped");
 		}
 	}
@@ -293,19 +288,14 @@ export class AppHeader extends Component<State> {
 	private async toggleRecording(): Promise<void> {
 		const recording = studio.state.stream.recording || localRecorder.isRecording;
 		if (recording) {
-			try {
-				const result = await localRecorder.stop();
-				if (result.canceled) toast("Recording discarded", "info");
-			} catch (err) {
-				toast(`Stop failed: ${userMessageFor(err)}`, "error");
-			}
-		} else {
-			try {
-				await localRecorder.start();
-				toast("Recording to disk", "success");
-			} catch (err) {
-				toast(`Recording failed: ${userMessageFor(err)}`, "error");
-			}
+			localRecorder.stop();
+			return;
+		}
+		try {
+			await localRecorder.start();
+			toast("Recording to disk", "success");
+		} catch (err) {
+			toast(`Recording failed: ${userMessageFor(err)}`, "error");
 		}
 	}
 }

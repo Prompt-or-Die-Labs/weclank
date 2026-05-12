@@ -91,18 +91,13 @@ function cycleSidebarTab(delta: 1 | -1): void {
 async function toggleRecording(): Promise<void> {
 	const recording = studio.state.stream.recording || localRecorder.isRecording;
 	if (recording) {
-		try {
-			const result = await localRecorder.stop();
-			if (result.canceled) toast("Recording discarded", "info");
-		} catch (err) {
-			toast(`Stop failed: ${userMessageFor(err)}`, "error");
-		}
-	} else {
-		try {
-			await localRecorder.start();
-			toast("Recording started", "success");
-		} catch (err) {
-			toast(`Recording failed: ${userMessageFor(err)}`, "error");
-		}
+		localRecorder.stop();
+		return;
+	}
+	try {
+		await localRecorder.start();
+		toast("Recording started", "success");
+	} catch (err) {
+		toast(`Recording failed: ${userMessageFor(err)}`, "error");
 	}
 }

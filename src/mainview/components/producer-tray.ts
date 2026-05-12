@@ -633,15 +633,14 @@ export class ProducerTray extends Component<State> {
 	}
 
 	private async toggleRecord(): Promise<void> {
+		const recording = studio.state.stream.recording || localRecorder.isRecording;
+		if (recording) {
+			localRecorder.stop();
+			return;
+		}
 		try {
-			const recording = studio.state.stream.recording || localRecorder.isRecording;
-			if (recording) {
-				const result = await localRecorder.stop();
-				if (result.canceled) toast("Recording discarded", "info");
-			} else {
-				await localRecorder.start();
-				toast("Recording", "success");
-			}
+			await localRecorder.start();
+			toast("Recording", "success");
 		} catch (err) {
 			toast(`Record toggle failed: ${userMessageFor(err)}`, "error");
 		}

@@ -49,7 +49,11 @@ function stopRecorder(recorder: MediaRecorder): Promise<void> {
 	if (recorder.state === "inactive") return Promise.resolve();
 	return new Promise<void>((resolve) => {
 		recorder.addEventListener("stop", () => resolve(), { once: true });
-		recorder.requestData();
-		recorder.stop();
+		try {
+			recorder.requestData();
+			recorder.stop();
+		} catch {
+			resolve();
+		}
 	});
 }

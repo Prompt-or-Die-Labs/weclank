@@ -3,9 +3,9 @@
 // 1-second WebM blobs, base64-encode each, and ship to the Bun side which
 // hands them to ffmpeg over stdin.
 //
-// Defaults to the 720p preset — that's our target for the low-strain
-// developer-streaming use case (full 1080p doubles encoder cost for
-// imperceptible gain at typical viewer scale).
+// Like the local recorder, `stop()` is fire-and-forget: the UI flips off
+// LIVE immediately and ffmpeg shuts down in the background. The user
+// never waits on the encoder to click again.
 
 import { streamEngine } from "./stream-engine";
 import { bunRpc } from "../rpc";
@@ -56,10 +56,22 @@ class EgressController {
 		}
 	}
 
-	async stop(): Promise<void> {
+	/** Fire-and-forget. Live=false flips immediately; ffmpeg drains in background. */
+	stop(): void {
 		const capture = this.capture;
 		this.capture = null;
-		await capture?.stop();
+		studio.setStream({ live: false });
+		void this.shutdown(capture);
+	}
+
+	private async shutdown(capture: BroadcastCaptureSession | null): Promise<void> {
+		if (capture) {
+			try {
+				await capture.stop();
+			} catch (err) {
+				console.warn("[egress] recorder stop failed", err);
+			}
+		}
 		try {
 			await bunRpc.stopStreamEgress({});
 		} catch (err) {

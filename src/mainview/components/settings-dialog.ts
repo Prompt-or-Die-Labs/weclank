@@ -258,15 +258,14 @@ async function copyProgramState(): Promise<void> {
 }
 
 async function toggleRecording(): Promise<void> {
+	const recording = studio.state.stream.recording || localRecorder.isRecording;
+	if (recording) {
+		localRecorder.stop();
+		return;
+	}
 	try {
-		const recording = studio.state.stream.recording || localRecorder.isRecording;
-		if (recording) {
-			const result = await localRecorder.stop();
-			if (result.canceled) toast("Recording discarded", "info");
-		} else {
-			await localRecorder.start();
-			toast("Recording started", "success");
-		}
+		await localRecorder.start();
+		toast("Recording started", "success");
 	} catch (err) {
 		toast(`Recording failed: ${userMessageFor(err)}`, "error");
 	}
