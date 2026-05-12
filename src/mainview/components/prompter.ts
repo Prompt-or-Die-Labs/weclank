@@ -1,8 +1,7 @@
-// Teleprompter – clean, focused, matches main app design system
-
 import { Component } from "../core/component";
 import { bunRpc } from "../rpc";
 import { authStore } from "../auth/auth-store";
+import { escapeHtml } from "./primitives";
 
 interface State {
 	scripts: Array<{ id: string; title: string; isGenerated?: boolean }>;
@@ -38,52 +37,40 @@ export class Prompter extends Component<State> {
 
 	protected template(): string {
 		return `
-<div class="teleprompter" style="display:flex;flex-direction:column;height:100vh;width:100vw;background:var(--panel-dark);color:var(--on-dark-0);font-family:var(--font-sans);">
-	<!-- Top bar -->
-	<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--panel-dark-border);background:var(--panel-dark-2);flex-shrink:0;">
-		<div style="display:flex;align-items:center;gap:12px;">
-			<div style="font-weight:600;letter-spacing:-0.01em;">Teleprompter</div>
-			<select class="script-select" style="padding:6px 10px;background:var(--panel-dark-3);color:var(--on-dark-0);border:1px solid var(--panel-dark-border);border-radius:var(--radius-md);font-size:13px;min-width:180px;">
-				<option value="">-- New Script --</option>
-			</select>
-		</div>
-
-		<div style="display:flex;align-items:center;gap:8px;">
-			<button class="btn btn-secondary btn-generate" style="padding:6px 14px;font-size:13px;">Generate</button>
-			<button class="btn btn-secondary btn-upload" style="padding:6px 14px;font-size:13px;">Upload</button>
-			<input type="file" class="file-input" accept=".txt,.md" style="display:none;">
-			<button class="btn btn-danger btn-delete" style="padding:6px 14px;font-size:13px;display:none;">Delete</button>
-
-			<div style="width:1px;height:24px;background:var(--panel-dark-border);margin:0 8px;"></div>
-
-			<button class="btn btn-secondary btn-font-dec" style="padding:6px 10px;">−</button>
-			<span class="font-size" style="font-variant-numeric:tabular-nums;min-width:42px;text-align:center;font-size:13px;color:var(--on-dark-1);">${this.state.fontSize}px</span>
-			<button class="btn btn-secondary btn-font-inc" style="padding:6px 10px;">+</button>
-
-			<label style="display:flex;align-items:center;gap:6px;margin-left:12px;font-size:13px;color:var(--on-dark-1);">
-				<input type="checkbox" class="auto-scroll" style="accent-color:var(--accent);">
-				Auto
-			</label>
-			<input type="range" class="scroll-speed" min="5" max="120" value="${this.state.scrollSpeed}" style="width:90px;accent-color:var(--accent);">
-
-			<button class="btn btn-secondary btn-reset" style="padding:6px 14px;margin-left:8px;">Reset</button>
-		</div>
-	</div>
-
-	<!-- Main reading area -->
-	<div style="flex:1;display:flex;flex-direction:column;padding:24px 32px;min-height:0;background:#0a0c0a;">
-		<textarea
-			class="prompter-textarea"
-			style="flex:1;width:100%;resize:none;border:1px solid var(--panel-dark-border);background:#0a0c0a;color:var(--on-dark-0);font-family:var(--font-mono);font-size:${this.state.fontSize}px;line-height:1.65;padding:24px;border-radius:var(--radius-md);outline:none;"
-			placeholder="Type or paste your script here. Use the controls above to adjust size and scrolling."
-		>${this.state.content}</textarea>
-	</div>
-
-	<!-- Status bar -->
-	<div style="padding:8px 16px;border-top:1px solid var(--panel-dark-border);background:var(--panel-dark-2);font-size:12px;color:var(--on-dark-2);flex-shrink:0;">
-		<span class="status">Ready</span>
-	</div>
-</div>
+			<div class="teleprompter__toolbar">
+				<div class="teleprompter__script">
+					<div class="teleprompter__title">Teleprompter</div>
+					<select class="teleprompter__select script-select">
+						<option value="">New script</option>
+					</select>
+				</div>
+				<div class="teleprompter__controls">
+					<button class="teleprompter__button btn-generate">Generate</button>
+					<button class="teleprompter__button btn-upload">Upload</button>
+					<input type="file" class="file-input" accept=".txt,.md">
+					<button class="teleprompter__button teleprompter__button--danger btn-delete">Delete</button>
+					<span class="teleprompter__divider"></span>
+					<button class="teleprompter__button teleprompter__button--compact btn-font-dec">-</button>
+					<span class="teleprompter__font font-size">${this.state.fontSize}px</span>
+					<button class="teleprompter__button teleprompter__button--compact btn-font-inc">+</button>
+					<label class="teleprompter__auto">
+						<input type="checkbox" class="auto-scroll">
+						<span>Auto</span>
+					</label>
+					<input type="range" class="teleprompter__speed scroll-speed" min="5" max="120" value="${this.state.scrollSpeed}">
+					<button class="teleprompter__button btn-reset">Reset</button>
+				</div>
+			</div>
+			<div class="teleprompter__reader">
+				<textarea
+					class="prompter-textarea"
+					style="font-size:${this.state.fontSize}px"
+					placeholder="Type or paste your script here."
+				>${escapeHtml(this.state.content)}</textarea>
+			</div>
+			<div class="teleprompter__status">
+				<span class="status">Ready</span>
+			</div>
 		`;
 	}
 

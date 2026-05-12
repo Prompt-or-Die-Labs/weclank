@@ -1,10 +1,11 @@
-// Right sidebar — replaces the 92px tool-rail. Six tabs:
+// Right sidebar — replaces the 92px tool-rail. Seven tabs:
 //   Chat     (Twitch chat + click-to-overlay)
 //   Banters  (stream-overlay manager)
 //   Agents   (AI co-host status + tool-call log + speak)
 //   Media    (image / browser sources)
 //   Music    (now playing + volume + Suno generate)
 //   Notes    (Codex/Claude Code transcript watcher)
+//   Outputs  (post-stream recap, clips, questions, reports)
 //
 // Chat and Agents are inline implementations (the product-distinguishing
 // surfaces). The other four open existing dialogs for now and will be
@@ -17,8 +18,9 @@ import { BantersTab } from "./tabs/banters-tab";
 import { MediaTab } from "./tabs/media-tab";
 import { MusicTab } from "./tabs/music-tab";
 import { NotesTab } from "./tabs/notes-tab";
+import { OutputsTab } from "./tabs/outputs-tab";
 
-type TabId = "chat" | "banters" | "agents" | "media" | "music" | "notes";
+type TabId = "chat" | "banters" | "agents" | "media" | "music" | "notes" | "outputs";
 
 const TABS: { id: TabId; label: string }[] = [
 	{ id: "chat",    label: "Chat" },
@@ -27,6 +29,7 @@ const TABS: { id: TabId; label: string }[] = [
 	{ id: "media",   label: "Media" },
 	{ id: "music",   label: "Music" },
 	{ id: "notes",   label: "Notes" },
+	{ id: "outputs", label: "Outputs" },
 ];
 
 const STORAGE_KEY = "studio.rightSidebar.activeTab";
@@ -120,5 +123,6 @@ function makeTab(id: TabId): Component<unknown> {
 		case "media":   return new MediaTab() as Component<unknown>;
 		case "music":   return new MusicTab() as Component<unknown>;
 		case "notes":   return new NotesTab() as Component<unknown>;
+		case "outputs": return new OutputsTab() as Component<unknown>;
 	}
 }

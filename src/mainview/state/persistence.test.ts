@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { serializeState, deserializeState } from "./persistence";
 import { participantId, sceneId, overlayId } from "../core/ids";
+import { createDefaultRunOfShow } from "../producer/run-of-show";
 import type { StudioState } from "../core/types";
 
 function makeState(overrides: Partial<StudioState> = {}): StudioState {
@@ -25,10 +26,12 @@ function makeState(overrides: Partial<StudioState> = {}): StudioState {
 			},
 		},
 		stream: { title: "test", quality: "720p", recording: false, live: false },
+		runOfShow: createDefaultRunOfShow(),
 		overlays: {},
 		streamOverlays: [],
 		music: { volume: 0.4, current: null },
 		focusedParticipantId: null,
+		studioPrefs: { focusMode: "full" },
 		...overrides,
 	};
 }
@@ -42,6 +45,7 @@ describe("persistence", () => {
 		expect(restored!.scenes).toEqual(original.scenes);
 		expect(restored!.activeSceneId).toBe(original.activeSceneId);
 		expect(Object.keys(restored!.participants ?? {})).toEqual(Object.keys(original.participants));
+		expect(restored!.runOfShow).toEqual(original.runOfShow);
 	});
 
 	test("strips MediaStream runtime fields", () => {
@@ -129,6 +133,56 @@ describe("persistence", () => {
 		const persisted = serializeState(original);
 		expect(persisted.streamOverlays).toHaveLength(1);
 		expect(persisted.streamOverlays![0]!.id).toBe(overlayId("ov-perm"));
+	});
+
+	test("round-trips studioPrefs (v3)", () => {
+		const original = makeState({ studioPrefs: { focusMode: "broadcast" } });
+		const restored = deserializeState(serializeState(original))!;
+		expect(restored.studioPrefs?.focusMode).toBe("broadcast");
+	});
+
+	test("round-trips agent banter extended fields", () => {
+		const host = participantId("host");
+		const agent = participantId("p-agent-banter");
+		const banter = {
+			enabled: false,
+			twitchChannel: "#stream",
+			llmProvider: "openai" as const,
+			llmModel: "gpt-5.5",
+			systemPrompt: "Test persona",
+			voiceActivityGate: false,
+			proactiveOnTranscript: true,
+			voiceContext: true,
+			transcriptionProvider: "openai" as const,
+			transcriptionModel: "whisper-1",
+			visionProgramPreview: true,
+			autonomyLevel: "auto-safe" as const,
+			toolPermissions: { controlOverlays: true, controlMusic: false },
+		};
+		const original = makeState({
+			participants: {
+				[host]: {
+					id: host,
+					displayName: "Dev",
+					kind: "camera",
+					muted: false,
+					cameraOff: true,
+					isAgent: false,
+				},
+				[agent]: {
+					id: agent,
+					displayName: "Co-host",
+					kind: "voice",
+					muted: false,
+					cameraOff: false,
+					isAgent: true,
+					banter,
+				},
+			},
+		});
+		const restored = deserializeState(serializeState(original))!;
+		const b = restored.participants![agent]!.banter;
+		expect(b).toEqual(banter);
 	});
 
 	test("returns null on version mismatch (future version)", () => {

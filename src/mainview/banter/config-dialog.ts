@@ -3,10 +3,17 @@
 // to state + (re)starts the engine.
 
 import { Modal } from "../components/overlays";
-import { DEFAULT_BANTER_PROMPT, DEFAULT_BANTER_MODEL } from "./banter-engine";
+import { DEFAULT_BANTER_PROMPT, DEFAULT_BANTER_MODEL, DEFAULT_OPENAI_BANTER_MODEL } from "./banter-engine";
+import { SAFE_TOOL_PERMISSIONS } from "./tool-policy";
 import { getStoredApiKey } from "../tts/registry";
+import { hasSecret } from "../auth/secrets-cache";
+import { OPENAI_API_KEY } from "../auth/openai-api";
 import { TRANSCRIBE_MODEL_OPTIONS, DEFAULT_TRANSCRIBE_MODEL } from "../transcription/openrouter-stt";
-import type { BanterConfig } from "../core/types";
+import {
+	OPENAI_TRANSCRIBE_MODEL_OPTIONS,
+	DEFAULT_OPENAI_TRANSCRIBE_MODEL,
+} from "../transcription/openai-stt";
+import type { BanterConfig, BanterLlmProvider } from "../core/types";
 
 export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig | null> {
 	return new Promise((resolve) => {
@@ -18,6 +25,7 @@ export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig |
 		};
 
 		const hasOpenRouterKey = !!getStoredApiKey("openrouter");
+		const hasOpenAiKey = hasSecret(OPENAI_API_KEY);
 
 		const body = document.createElement("div");
 		body.className = "tts-config";
@@ -36,9 +44,18 @@ export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig |
 			</label>
 
 			<label class="tts-config__row">
-				<span>LLM model (OpenRouter)</span>
+				<span>LLM provider</span>
+				<select data-field="llmProvider">
+					<option value="openrouter">OpenRouter</option>
+					<option value="openai">OpenAI (API key / Codex)</option>
+				</select>
+				<small class="tts-config__hint">OpenRouter: one browser login covers TTS, STT, and LLM. OpenAI: use a platform <code>sk-</code> key (Chat Completions, Speech, Transcriptions, Images — save it under Settings).</small>
+			</label>
+
+			<label class="tts-config__row">
+				<span>LLM model</span>
 				<input type="text" data-field="llmModel" />
-				<small class="tts-config__hint">Default <code>openrouter/free</code> auto-routes to free models that support tool calling (rate limits apply). For higher throughput: <code>anthropic/claude-haiku-4-5</code>, <code>google/gemini-2.5-flash</code>, or any model from <a href="https://openrouter.ai/models?supported_parameters=tools" target="_blank" rel="noopener">openrouter.ai/models?supported_parameters=tools</a>.</small>
+				<small class="tts-config__hint" data-hint="llm-model"></small>
 			</label>
 
 			<label class="tts-config__row">
@@ -61,20 +78,52 @@ export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig |
 				<input type="checkbox" data-field="voiceContext" />
 				<span>Listen to my mic for context</span>
 			</label>
-			<small class="tts-config__hint">Transcribes your microphone via OpenRouter's <code>/audio/transcriptions</code> endpoint and feeds each utterance to the agent as a chat message from [host]. Requires a non-agent audio source — add a Microphone source or a camera with mic. Rate-limited to 14 utterances/min as a budget guard.</small>
+			<small class="tts-config__hint">Transcribes your microphone and feeds each utterance to the agent as a chat message from [host]. Requires a non-agent audio source — add a Microphone source or a camera with mic. Rate-limited to 14 utterances/min as a budget guard. Choose the STT API and model below (OpenRouter vs OpenAI each use their own key).</small>
+
+			<label class="tts-config__row">
+				<span>Mic transcription API</span>
+				<select data-field="transcriptionProvider">
+					<option value="openrouter">OpenRouter</option>
+					<option value="openai">OpenAI</option>
+				</select>
+			</label>
 
 			<label class="tts-config__row">
 				<span>Transcription model</span>
-				<select data-field="transcriptionModel">
-					${TRANSCRIBE_MODEL_OPTIONS.map((o) => `<option value="${o.id}">${o.label} — ${o.note}</option>`).join("")}
-				</select>
-				<small class="tts-config__hint">Studio-wide. Gemini 2.5 Flash is the cheapest token-priced option; Whisper bills per second of audio. Cumulative cost shown in the perf HUD (⌘⇧P).</small>
+				<select data-field="transcriptionModel"></select>
+				<small class="tts-config__hint" data-hint="trx-model"></small>
 			</label>
 
-			${hasOpenRouterKey ? "" : `
+			<label class="tts-config__row tts-config__row--inline">
+				<input type="checkbox" data-field="visionProgramPreview" />
+				<span>Attach program preview to each chat turn (vision)</span>
+			</label>
+			<small class="tts-config__hint">Sends a compressed JPEG of the composited broadcast with the latest user message so vision-capable models see layout. Throttled (~15s per agent). Uses extra tokens.</small>
+
+			<label class="tts-config__row">
+				<span>Autonomy</span>
+				<select data-field="autonomyLevel">
+					<option value="suggested">Suggested — draft actions for approval</option>
+					<option value="auto-safe">Auto-safe — low-risk actions only</option>
+					<option value="full">Full — act within enabled permissions</option>
+				</select>
+				<small class="tts-config__hint">Medium/high-risk actions appear in the producer tray for approval unless this is set to Full.</small>
+			</label>
+
+			<label class="tts-config__row tts-config__row--inline">
+				<input type="checkbox" data-field="controlOverlays" />
+				<span>Allow overlays and lower thirds</span>
+			</label>
+
+			<label class="tts-config__row tts-config__row--inline">
+				<input type="checkbox" data-field="controlMusic" />
+				<span>Allow music control</span>
+			</label>
+
+			${!hasOpenRouterKey && !hasOpenAiKey ? `
 			<div class="tts-config__footer">
-				⚠ No OpenRouter API key found. Open <strong>Voice settings → Provider: OpenRouter</strong> on any agent and save your key first — the banter engine reuses it.
-			</div>`}
+				⚠ No LLM API key found. Connect <strong>OpenRouter</strong> from the account menu, or save an <strong>OpenAI API key</strong> in Settings.
+			</div>` : ""}
 
 			<div class="tts-config__actions">
 				<button type="button" data-action="cancel">Cancel</button>
@@ -85,20 +134,74 @@ export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig |
 		const enabled = body.querySelector<HTMLInputElement>("[data-field=enabled]")!;
 		const channel = body.querySelector<HTMLInputElement>("[data-field=twitchChannel]")!;
 		const model = body.querySelector<HTMLInputElement>("[data-field=llmModel]")!;
+		const llmProvider = body.querySelector<HTMLSelectElement>("[data-field=llmProvider]")!;
+		const modelHint = body.querySelector<HTMLElement>("[data-hint=llm-model]")!;
+
+		const hintOpenRouter =
+			'Default <code>openrouter/free</code> auto-routes to free models that support tool calling (rate limits apply). For higher throughput: <code>anthropic/claude-haiku-4-5</code>, <code>google/gemini-2.5-flash</code>, or any model from <a href="https://openrouter.ai/models?supported_parameters=tools" target="_blank" rel="noopener">openrouter.ai/models?supported_parameters=tools</a>.';
+		const hintOpenAi =
+			'Default <code>gpt-5.3-codex</code> matches the current Codex-class agentic model (Chat Completions + tools). For the general flagship, OpenAI documents <code>gpt-5.5</code> as the default starting point. Verify ids in <a href="https://platform.openai.com/docs/models" target="_blank" rel="noopener">platform.openai.com/docs/models</a> or the <a href="https://developers.openai.com/api/docs/models/all" target="_blank" rel="noopener">full model list</a>.';
+
+		const syncModelHint = (): void => {
+			const p = llmProvider.value as BanterLlmProvider;
+			modelHint.innerHTML = p === "openai" ? hintOpenAi : hintOpenRouter;
+		};
+
+		const prov: BanterLlmProvider = initial?.llmProvider ?? "openrouter";
+		llmProvider.value = prov;
+		model.value =
+			initial?.llmModel ??
+			(prov === "openai" ? DEFAULT_OPENAI_BANTER_MODEL : DEFAULT_BANTER_MODEL);
+		syncModelHint();
+		llmProvider.addEventListener("change", () => {
+			syncModelHint();
+			const p = llmProvider.value as BanterLlmProvider;
+			if (p === "openai" && model.value.includes("/")) {
+				model.value = DEFAULT_OPENAI_BANTER_MODEL;
+			}
+		});
+
 		const prompt = body.querySelector<HTMLTextAreaElement>("[data-field=systemPrompt]")!;
 		const vad = body.querySelector<HTMLInputElement>("[data-field=voiceActivityGate]")!;
 		const proactive = body.querySelector<HTMLInputElement>("[data-field=proactiveOnTranscript]")!;
 		const voiceContext = body.querySelector<HTMLInputElement>("[data-field=voiceContext]")!;
+		const autonomyLevel = body.querySelector<HTMLSelectElement>("[data-field=autonomyLevel]")!;
+		const controlOverlays = body.querySelector<HTMLInputElement>("[data-field=controlOverlays]")!;
+		const controlMusic = body.querySelector<HTMLInputElement>("[data-field=controlMusic]")!;
+		const transcriptionProvider = body.querySelector<HTMLSelectElement>("[data-field=transcriptionProvider]")!;
 		const transcriptionModel = body.querySelector<HTMLSelectElement>("[data-field=transcriptionModel]")!;
+		const trxModelHint = body.querySelector<HTMLElement>("[data-hint=trx-model]")!;
+		const visionProgramPreview = body.querySelector<HTMLInputElement>("[data-field=visionProgramPreview]")!;
+
+		const hintTrxOpenRouter =
+			"OpenRouter STT — cumulative cost from the API when available; perf HUD (⌘⇧P). Gemini Flash is the cheap default.";
+		const hintTrxOpenAi = "OpenAI <code>/v1/audio/transcriptions</code> — uses your saved OpenAI platform key.";
+
+		const fillTrxModelOptions = (): void => {
+			const p = transcriptionProvider.value as "openrouter" | "openai";
+			const opts = p === "openai" ? OPENAI_TRANSCRIBE_MODEL_OPTIONS : TRANSCRIBE_MODEL_OPTIONS;
+			const prev = transcriptionModel.value;
+			transcriptionModel.innerHTML = opts.map((o) => `<option value="${o.id}">${o.label} — ${o.note}</option>`).join("");
+			const ids = new Set(opts.map((o) => o.id));
+			if (ids.has(prev)) transcriptionModel.value = prev;
+			else transcriptionModel.value = p === "openai" ? DEFAULT_OPENAI_TRANSCRIBE_MODEL : DEFAULT_TRANSCRIBE_MODEL;
+			trxModelHint.innerHTML = p === "openai" ? hintTrxOpenAi : hintTrxOpenRouter;
+		};
 
 		enabled.checked = initial?.enabled ?? true;
 		channel.value = initial?.twitchChannel ?? "";
-		model.value = initial?.llmModel ?? DEFAULT_BANTER_MODEL;
 		prompt.value = initial?.systemPrompt ?? DEFAULT_BANTER_PROMPT;
 		vad.checked = initial?.voiceActivityGate ?? true;
 		proactive.checked = initial?.proactiveOnTranscript ?? true;
 		voiceContext.checked = initial?.voiceContext ?? true;
-		transcriptionModel.value = initial?.transcriptionModel ?? DEFAULT_TRANSCRIBE_MODEL;
+		autonomyLevel.value = initial?.autonomyLevel ?? "auto-safe";
+		controlOverlays.checked = initial?.toolPermissions?.controlOverlays ?? SAFE_TOOL_PERMISSIONS.controlOverlays;
+		controlMusic.checked = initial?.toolPermissions?.controlMusic ?? SAFE_TOOL_PERMISSIONS.controlMusic;
+		transcriptionProvider.value = initial?.transcriptionProvider ?? "openrouter";
+		fillTrxModelOptions();
+		if (initial?.transcriptionModel) transcriptionModel.value = initial.transcriptionModel;
+		visionProgramPreview.checked = initial?.visionProgramPreview ?? false;
+		transcriptionProvider.addEventListener("change", fillTrxModelOptions);
 
 		const modal = new Modal({
 			title: "Banter settings",
@@ -108,15 +211,25 @@ export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig |
 
 		body.querySelector<HTMLButtonElement>("[data-action=cancel]")!.addEventListener("click", () => modal.close());
 		body.querySelector<HTMLButtonElement>("[data-action=save]")!.addEventListener("click", () => {
+			const p = llmProvider.value as BanterLlmProvider;
+			const defaultModel = p === "openai" ? DEFAULT_OPENAI_BANTER_MODEL : DEFAULT_BANTER_MODEL;
 			const config: BanterConfig = {
 				enabled: enabled.checked,
 				twitchChannel: channel.value.trim(),
-				llmModel: model.value.trim() || DEFAULT_BANTER_MODEL,
+				llmProvider: p,
+				llmModel: model.value.trim() || defaultModel,
 				systemPrompt: prompt.value.trim() || DEFAULT_BANTER_PROMPT,
 				voiceActivityGate: vad.checked,
 				proactiveOnTranscript: proactive.checked,
 				voiceContext: voiceContext.checked,
+				transcriptionProvider: transcriptionProvider.value as "openrouter" | "openai",
 				transcriptionModel: transcriptionModel.value,
+				visionProgramPreview: visionProgramPreview.checked,
+				autonomyLevel: autonomyLevel.value as BanterConfig["autonomyLevel"],
+				toolPermissions: {
+					controlOverlays: controlOverlays.checked,
+					controlMusic: controlMusic.checked,
+				},
 			};
 			resolveOnce(config);
 			modal.close();

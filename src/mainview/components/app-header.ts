@@ -9,11 +9,13 @@ import { authStore } from "../auth/auth-store";
 import type { StreamQuality, StudioState } from "../core/types";
 import { Popover, toast } from "./overlays";
 import { connectOpenRouterOAuth, OPENROUTER_KEY } from "../auth/openrouter-oauth";
+import { openOpenAiApiKeyDialog, OPENAI_API_KEY } from "../auth/openai-api";
 import { hasSecret } from "../auth/secrets-cache";
 import { egressController } from "../streaming/egress";
 import { pickRtmpDestination } from "../streaming/rtmp-config-dialog";
 import { localRecorder } from "../streaming/recorder";
 import { userMessageFor } from "../core/errors";
+import { bunRpc } from "../rpc";
 import { openSettingsDialog } from "./settings-dialog";
 
 interface State {
@@ -25,6 +27,17 @@ interface State {
 	liveStartedAt: number | null;
 	nowMs: number;
 }
+
+type UtilityKind = "studio" | "chat" | "producer" | "stats" | "overlay" | "prompter";
+
+const UTILITY_ITEMS: Array<{ kind: UtilityKind; label: string }> = [
+	{ kind: "studio", label: "Studio Dock" },
+	{ kind: "chat", label: "Chat" },
+	{ kind: "producer", label: "Producer" },
+	{ kind: "stats", label: "Monitor" },
+	{ kind: "overlay", label: "Overlay" },
+	{ kind: "prompter", label: "Prompter" },
+];
 
 export class AppHeader extends Component<State> {
 	private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -48,6 +61,7 @@ export class AppHeader extends Component<State> {
 	}
 
 	protected afterMount(): void {
+		this.el.setAttribute("role", "banner");
 		// Tick the displayed elapsed time once a second while live.
 		this.tickTimer = setInterval(() => {
 			if (this.state.liveStartedAt !== null) this.setState({ nowMs: Date.now() });
@@ -79,6 +93,7 @@ export class AppHeader extends Component<State> {
 			<div class="app-header__right">
 				${stream.recording ? `<span class="rec-badge" aria-label="Recording to disk">REC</span>` : ""}
 				${elapsed ? `<span class="stream-timer tabular" aria-label="Time live">${elapsed}</span>` : ""}
+				<button class="utilities-btn" id="utilities-menu" aria-label="Open utility windows">Utilities</button>
 				<button class="rec-btn ${stream.recording ? "rec-btn--on" : ""}" id="rec-toggle" aria-label="${stream.recording ? "Stop recording" : "Start recording to disk"}" aria-pressed="${stream.recording ? "true" : "false"}">REC</button>
 				<button class="stream-status" id="stream-status" aria-label="Stream settings">
 					<div class="stream-status__row">
@@ -96,6 +111,7 @@ export class AppHeader extends Component<State> {
 	protected bind(): void {
 		this.on(this.$("#event-title"), "click", (e) => this.openEventMenu(e.currentTarget as HTMLElement));
 		this.on(this.$("#stream-status"), "click", (e) => this.openStreamMenu(e.currentTarget as HTMLElement));
+		this.on(this.$("#utilities-menu"), "click", (e) => this.openUtilitiesMenu(e.currentTarget as HTMLElement));
 		this.on(this.$("#go-live"), "click", () => this.toggleLive());
 		this.on(this.$("#rec-toggle"), "click", () => this.toggleRecording());
 		this.on(this.$("#user-menu"), "click", (e) => this.openUserMenu(e.currentTarget as HTMLElement));
@@ -103,6 +119,7 @@ export class AppHeader extends Component<State> {
 
 	private openUserMenu(anchor: HTMLElement): void {
 		const connected = hasSecret(OPENROUTER_KEY);
+		const openAiSaved = hasSecret(OPENAI_API_KEY);
 		const menu = document.createElement("div");
 		menu.className = "menu";
 		menu.innerHTML = `
@@ -110,6 +127,10 @@ export class AppHeader extends Component<State> {
 			<button class="menu__item" data-act="openrouter">
 				OpenRouter
 				<small>${connected ? "● connected" : "○ not connected"}</small>
+			</button>
+			<button class="menu__item" data-act="openai-key">
+				OpenAI API key
+				<small>${openAiSaved ? "● saved" : "○ not set"}</small>
 			</button>
 			<button class="menu__item" data-act="settings">Settings…</button>
 			<div class="menu__divider"></div>
@@ -123,6 +144,9 @@ export class AppHeader extends Component<State> {
 				switch (btn.dataset["act"]) {
 					case "openrouter":
 						await this.connectOpenRouter();
+						break;
+					case "openai-key":
+						await openOpenAiApiKeyDialog();
 						break;
 					case "settings":
 						openSettingsDialog();
@@ -139,6 +163,42 @@ export class AppHeader extends Component<State> {
 						break;
 				}
 			});
+		});
+	}
+
+	private openUtilitiesMenu(anchor: HTMLElement): void {
+		const menu = document.createElement("div");
+		menu.className = "menu menu--utilities";
+		menu.innerHTML = `
+			<div class="menu__section">Utility windows</div>
+			${UTILITY_ITEMS.map((item) => `<button class="menu__item" data-kind="${item.kind}">${item.label}</button>`).join("")}
+			<div class="menu__divider"></div>
+			<button class="menu__item" data-close="all">Close utilities</button>
+		`;
+		const popover = new Popover({ anchor, content: menu });
+		menu.querySelectorAll<HTMLButtonElement>("[data-kind]").forEach((btn) => {
+			btn.addEventListener("click", async () => {
+				popover.dismiss();
+				const kind = btn.dataset["kind"] as UtilityKind;
+				try {
+					await bunRpc.openStudioUtilityWindow({
+						kind,
+						clickThrough: kind === "overlay",
+						alwaysOnTop: kind === "overlay" || kind === "prompter",
+					});
+				} catch (err) {
+					toast(`Utility failed: ${userMessageFor(err)}`, "error");
+				}
+			});
+		});
+		menu.querySelector<HTMLButtonElement>("[data-close]")?.addEventListener("click", async () => {
+			popover.dismiss();
+			try {
+				await bunRpc.closeStudioUtilityWindows({});
+				toast("Utility windows closed");
+			} catch (err) {
+				toast(`Close failed: ${userMessageFor(err)}`, "error");
+			}
 		});
 	}
 

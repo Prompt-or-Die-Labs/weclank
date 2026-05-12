@@ -4,7 +4,7 @@ export default {
 	app: {
 		name: "weclank",
 		identifier: "weclank.localfirst.dev",
-		version: "0.0.1",
+		version: "0.1.0",
 	},
 	build: {
 		views: {

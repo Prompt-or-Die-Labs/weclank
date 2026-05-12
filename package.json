@@ -5,6 +5,7 @@
 	"scripts": {
 		"start": "electrobun dev",
 		"dev": "electrobun dev --watch",
+		"build": "electrobun build --env=canary",
 		"build:canary": "electrobun build --env=canary",
 		"test": "bun test",
 		"test:watch": "bun test --watch",

@@ -151,7 +151,7 @@ export async function createParticipantFromKind(
 		}
 		case "voice-vrm":
 		case "voice-glb": {
-			const result = await (bunRpc as any)['pickModelFile']({
+			const result = await bunRpc.pickModelFile({
 				kind: kind === "voice-vrm" ? "vrm" : "glb",
 			});
 			if (result.canceled) return null;

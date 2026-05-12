@@ -9,9 +9,23 @@
 // Resolves with { name, role, banterConfig } or null on cancel.
 
 import { Modal } from "../components/overlays";
-import { DEFAULT_BANTER_MODEL } from "./banter-engine";
+import { DEFAULT_BANTER_MODEL, DEFAULT_OPENAI_BANTER_MODEL } from "./banter-engine";
+import { FULL_TOOL_PERMISSIONS, SAFE_TOOL_PERMISSIONS } from "./tool-policy";
 import { getStoredApiKey } from "../tts/registry";
-import type { AssistantRole, BanterConfig } from "../core/types";
+import { hasSecret } from "../auth/secrets-cache";
+import { OPENAI_API_KEY } from "../auth/openai-api";
+import { TRANSCRIBE_MODEL_OPTIONS, DEFAULT_TRANSCRIBE_MODEL } from "../transcription/openrouter-stt";
+import {
+	OPENAI_TRANSCRIBE_MODEL_OPTIONS,
+	DEFAULT_OPENAI_TRANSCRIBE_MODEL,
+} from "../transcription/openai-stt";
+import type {
+	AgentAutonomyLevel,
+	AgentToolPermissions,
+	AssistantRole,
+	BanterConfig,
+	BanterLlmProvider,
+} from "../core/types";
 
 export interface AssistantSetup {
 	displayName: string;
@@ -119,8 +133,14 @@ export function pickAssistantConfig(
 			resolve(v);
 		};
 
-		const hasKey = !!getStoredApiKey("openrouter");
+		const hasAnyLlmKey = !!getStoredApiKey("openrouter") || hasSecret(OPENAI_API_KEY);
 		const initRole: AssistantRole = initial?.role ?? "co-host";
+		const initProv: BanterLlmProvider = initial?.banterConfig?.llmProvider ?? "openrouter";
+		const initModel =
+			initial?.banterConfig?.llmModel ??
+			(initProv === "openai" ? DEFAULT_OPENAI_BANTER_MODEL : DEFAULT_BANTER_MODEL);
+		const saveLabel = initial?.displayName?.trim() ? "Save changes" : "Add assistant";
+		const modalTitle = initial?.displayName?.trim() ? "Edit text assistant" : "Add text assistant";
 
 		const body = document.createElement("div");
 		body.className = "tts-config";
@@ -140,9 +160,18 @@ export function pickAssistantConfig(
 			</label>
 
 			<label class="tts-config__row">
-				<span>LLM model (OpenRouter)</span>
-				<input type="text" data-field="model" value="${escHtml(initial?.banterConfig?.llmModel ?? DEFAULT_BANTER_MODEL)}" />
-				<small class="tts-config__hint"><code>openrouter/free</code> auto-routes to free models. For higher throughput: <code>anthropic/claude-haiku-4-5</code>, <code>google/gemini-2.5-flash</code>.</small>
+				<span>LLM provider</span>
+				<select data-field="llmProvider">
+					<option value="openrouter"${initProv === "openrouter" ? " selected" : ""}>OpenRouter</option>
+					<option value="openai"${initProv === "openai" ? " selected" : ""}>OpenAI (API key)</option>
+				</select>
+				<small class="tts-config__hint">OpenRouter covers TTS + STT + default LLM. OpenAI: platform <code>sk-</code> key for chat, speech, transcriptions, and images (Settings).</small>
+			</label>
+
+			<label class="tts-config__row">
+				<span>LLM model</span>
+				<input type="text" data-field="model" value="${escHtml(initModel)}" />
+				<small class="tts-config__hint" data-hint="llm-model"></small>
 			</label>
 
 			<label class="tts-config__row">
@@ -166,34 +195,128 @@ export function pickAssistantConfig(
 				<input type="checkbox" data-field="voiceContext" ${(initial?.banterConfig?.voiceContext ?? true) ? "checked" : ""} />
 				<span>Listen to host mic for context</span>
 			</label>
+			<small class="tts-config__hint">Same mic transcription path as voice agents — pick API + model below.</small>
 
-			${hasKey ? "" : `
+			<label class="tts-config__row">
+				<span>Mic transcription API</span>
+				<select data-field="trxProvider">
+					<option value="openrouter">OpenRouter</option>
+					<option value="openai">OpenAI</option>
+				</select>
+			</label>
+
+			<label class="tts-config__row">
+				<span>Transcription model</span>
+				<select data-field="trxModel"></select>
+				<small class="tts-config__hint" data-hint="trx-model"></small>
+			</label>
+
+			<label class="tts-config__row tts-config__row--inline">
+				<input type="checkbox" data-field="visionPreview" />
+				<span>Attach program preview to each turn (vision)</span>
+			</label>
+
+			<label class="tts-config__row">
+				<span>Autonomy</span>
+				<select data-field="autonomy">
+					<option value="suggested">Suggested — draft actions for approval</option>
+					<option value="auto-safe">Auto-safe — low-risk actions only</option>
+					<option value="full">Full — act within enabled permissions</option>
+				</select>
+				<small class="tts-config__hint">Suggested actions appear in the producer tray. Full is best reserved for trusted overlay bots.</small>
+			</label>
+
+			<label class="tts-config__row tts-config__row--inline">
+				<input type="checkbox" data-field="controlOverlays" />
+				<span>Allow overlays and lower thirds</span>
+			</label>
+
+			<label class="tts-config__row tts-config__row--inline">
+				<input type="checkbox" data-field="controlMusic" />
+				<span>Allow music control</span>
+			</label>
+
+			${hasAnyLlmKey ? "" : `
 			<div class="tts-config__footer">
-				⚠ No OpenRouter API key found. Connect OpenRouter from the user menu (top-right avatar) first.
+				⚠ No LLM API key found. Connect <strong>OpenRouter</strong> from the account menu, or save an <strong>OpenAI API key</strong> in Settings.
 			</div>`}
 
 			<div class="tts-config__actions">
 				<button type="button" data-action="cancel">Cancel</button>
-				<button type="button" data-action="save" class="primary">Add assistant</button>
+				<button type="button" data-action="save" class="primary">${escHtml(saveLabel)}</button>
 			</div>
 		`;
 
 		const nameEl = body.querySelector<HTMLInputElement>("[data-field=name]")!;
 		const roleEl = body.querySelector<HTMLSelectElement>("[data-field=role]")!;
+		const llmProviderEl = body.querySelector<HTMLSelectElement>("[data-field=llmProvider]")!;
 		const modelEl = body.querySelector<HTMLInputElement>("[data-field=model]")!;
+		const modelHint = body.querySelector<HTMLElement>("[data-hint=llm-model]")!;
+
+		const hintOpenRouter =
+			'<code>openrouter/free</code> auto-routes to free models. For higher throughput: <code>anthropic/claude-haiku-4-5</code>, <code>google/gemini-2.5-flash</code>.';
+		const hintOpenAi =
+			'Default <code>gpt-5.3-codex</code> (current Codex-class agentic model). Alternative: <code>gpt-5.5</code> (documented flagship). Catalog: <a href="https://developers.openai.com/api/docs/models/all" target="_blank" rel="noopener">developers.openai.com/api/docs/models/all</a>.';
+
+		const syncModelHint = (): void => {
+			modelHint.innerHTML = llmProviderEl.value === "openai" ? hintOpenAi : hintOpenRouter;
+		};
+		syncModelHint();
+		llmProviderEl.addEventListener("change", () => {
+			syncModelHint();
+			if (llmProviderEl.value === "openai" && modelEl.value.includes("/")) {
+				modelEl.value = DEFAULT_OPENAI_BANTER_MODEL;
+			}
+		});
 		const channelEl = body.querySelector<HTMLInputElement>("[data-field=channel]")!;
 		const promptEl = body.querySelector<HTMLTextAreaElement>("[data-field=prompt]")!;
 		const proactiveEl = body.querySelector<HTMLInputElement>("[data-field=proactive]")!;
 		const voiceContextEl = body.querySelector<HTMLInputElement>("[data-field=voiceContext]")!;
+		const autonomyEl = body.querySelector<HTMLSelectElement>("[data-field=autonomy]")!;
+		const controlOverlaysEl = body.querySelector<HTMLInputElement>("[data-field=controlOverlays]")!;
+		const controlMusicEl = body.querySelector<HTMLInputElement>("[data-field=controlMusic]")!;
+		const trxProviderEl = body.querySelector<HTMLSelectElement>("[data-field=trxProvider]")!;
+		const trxModelEl = body.querySelector<HTMLSelectElement>("[data-field=trxModel]")!;
+		const trxModelHint = body.querySelector<HTMLElement>("[data-hint=trx-model]")!;
+		const visionPreviewEl = body.querySelector<HTMLInputElement>("[data-field=visionPreview]")!;
 
-		// Seed prompt from role.
+		const hintTrxOpenRouter =
+			"OpenRouter STT — cheap default is Gemini Flash; cumulative cost in perf HUD when available.";
+		const hintTrxOpenAi = "OpenAI native transcriptions — uses your saved OpenAI key.";
+
+		const fillTrxModelOptions = (): void => {
+			const p = trxProviderEl.value as "openrouter" | "openai";
+			const opts = p === "openai" ? OPENAI_TRANSCRIBE_MODEL_OPTIONS : TRANSCRIBE_MODEL_OPTIONS;
+			const prev = trxModelEl.value;
+			trxModelEl.innerHTML = opts.map((o) => `<option value="${o.id}">${o.label} — ${o.note}</option>`).join("");
+			const ids = new Set(opts.map((o) => o.id));
+			if (ids.has(prev)) trxModelEl.value = prev;
+			else trxModelEl.value = p === "openai" ? DEFAULT_OPENAI_TRANSCRIBE_MODEL : DEFAULT_TRANSCRIBE_MODEL;
+			trxModelHint.innerHTML = p === "openai" ? hintTrxOpenAi : hintTrxOpenRouter;
+		};
+
+		trxProviderEl.value = initial?.banterConfig?.transcriptionProvider ?? "openrouter";
+		fillTrxModelOptions();
+		if (initial?.banterConfig?.transcriptionModel) trxModelEl.value = initial.banterConfig.transcriptionModel;
+		visionPreviewEl.checked = initial?.banterConfig?.visionProgramPreview ?? false;
+		trxProviderEl.addEventListener("change", fillTrxModelOptions);
+
+		const applyPolicyFields = (autonomy: AgentAutonomyLevel, permissions: AgentToolPermissions): void => {
+			autonomyEl.value = autonomy;
+			controlOverlaysEl.checked = permissions.controlOverlays;
+			controlMusicEl.checked = permissions.controlMusic;
+		};
+
 		promptEl.value = initial?.banterConfig?.systemPrompt ?? ROLE_PROMPTS[initRole];
+		applyPolicyFields(
+			initial?.banterConfig?.autonomyLevel ?? defaultAutonomyForRole(initRole),
+			initial?.banterConfig?.toolPermissions ?? defaultPermissionsForRole(initRole),
+		);
 
-		// When the role changes, reload the preset prompt (unless custom).
 		roleEl.addEventListener("change", () => {
 			const role = roleEl.value as AssistantRole;
 			promptEl.value = ROLE_PROMPTS[role];
-			// Auto-fill a default name if the field is still empty.
+			applyPolicyFields(defaultAutonomyForRole(role), defaultPermissionsForRole(role));
 			if (!nameEl.value.trim()) {
 				const def = ASSISTANT_ROLES.find((r) => r.id === role);
 				if (def) nameEl.value = def.label;
@@ -207,7 +330,7 @@ export function pickAssistantConfig(
 		}
 
 		const modal = new Modal({
-			title: "Add text assistant",
+			title: modalTitle,
 			body,
 			onClose: () => resolveOnce(null),
 		});
@@ -219,19 +342,54 @@ export function pickAssistantConfig(
 			.addEventListener("click", () => {
 				const role = roleEl.value as AssistantRole;
 				const name = nameEl.value.trim() || (ASSISTANT_ROLES.find((r) => r.id === role)?.label ?? "Assistant");
+				const p = llmProviderEl.value as BanterLlmProvider;
+				const defModel = p === "openai" ? DEFAULT_OPENAI_BANTER_MODEL : DEFAULT_BANTER_MODEL;
 				const config: BanterConfig = {
 					enabled: true,
 					twitchChannel: channelEl.value.trim().replace(/^#/, ""),
-					llmModel: modelEl.value.trim() || DEFAULT_BANTER_MODEL,
+					llmProvider: p,
+					llmModel: modelEl.value.trim() || defModel,
 					systemPrompt: promptEl.value.trim() || ROLE_PROMPTS[role],
 					voiceActivityGate: false, // text-only agents don't need VAD
 					proactiveOnTranscript: proactiveEl.checked,
 					voiceContext: voiceContextEl.checked,
+					transcriptionProvider: trxProviderEl.value as "openrouter" | "openai",
+					transcriptionModel: trxModelEl.value,
+					visionProgramPreview: visionPreviewEl.checked,
+					autonomyLevel: autonomyEl.value as AgentAutonomyLevel,
+					toolPermissions: {
+						controlOverlays: controlOverlaysEl.checked,
+						controlMusic: controlMusicEl.checked,
+					},
 				};
 				resolveOnce({ displayName: name, role, banterConfig: config });
 				modal.close();
 			});
 	});
+}
+
+function defaultAutonomyForRole(role: AssistantRole): AgentAutonomyLevel {
+	switch (role) {
+		case "overlay-bot": return "full";
+		case "co-host": return "auto-safe";
+		case "chat-monitor":
+		case "producer":
+		case "code-narrator":
+		case "custom":
+			return "suggested";
+	}
+}
+
+function defaultPermissionsForRole(role: AssistantRole): AgentToolPermissions {
+	switch (role) {
+		case "overlay-bot": return FULL_TOOL_PERMISSIONS;
+		case "producer": return SAFE_TOOL_PERMISSIONS;
+		case "co-host": return SAFE_TOOL_PERMISSIONS;
+		case "chat-monitor":
+		case "code-narrator":
+		case "custom":
+			return { controlOverlays: false, controlMusic: false };
+	}
 }
 
 function escHtml(s: string): string {

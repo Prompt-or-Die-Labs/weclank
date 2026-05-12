@@ -5,6 +5,8 @@ import type { PhotoBoothRPC } from "../bun/index";
 
 const rpc = Electroview.defineRPC<PhotoBoothRPC>({ handlers: { requests: {}, messages: {} } });
 const electroview = new Electrobun.Electroview({ rpc });
+const bunRpc = electroview.rpc!.request;
+const USER_STORAGE_KEY = "studio.currentUserId";
 
 document.body.style.cssText = "margin:0;padding:0;background:#0e120e;color:#d6dac8;height:100vh;width:100vw;font-family:Inter,system-ui;overflow:hidden";
 const app = document.getElementById("app")!;
@@ -87,6 +89,35 @@ function showStatus(msg: string, timeout = 2200) {
   if (timeout) setTimeout(() => statusEl.textContent = "Ready", timeout);
 }
 
+function currentUserId(): string | null {
+  const queryUserId = new URLSearchParams(window.location.search).get("userId");
+  if (queryUserId) return queryUserId;
+  try {
+    return localStorage.getItem(USER_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function requireUserId(): string | null {
+  const userId = currentUserId();
+  if (!userId) showStatus("Sign in from the Studio window first", 4000);
+  return userId;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (ch) => {
+    switch (ch) {
+      case "&": return "&amp;";
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case "\"": return "&quot;";
+      case "'": return "&#39;";
+      default: return ch;
+    }
+  });
+}
+
 function updateInfo() {
   const words = textarea.value.trim().split(/\s+/).filter(Boolean).length;
   const chars = textarea.value.length;
@@ -96,8 +127,10 @@ function updateInfo() {
 textarea.addEventListener("input", () => {
   updateInfo();
   if (currentScriptId) {
-    // Auto-save
-    (electroview.rpc as any).request.updateScript({
+    const userId = currentUserId();
+    if (!userId) return;
+    bunRpc.updateScript({
+      userId,
       scriptId: currentScriptId,
       content: textarea.value,
     }).catch(() => {});
@@ -197,14 +230,16 @@ btnFit.onclick = () => {
 
 // === Script management ===
 async function loadScriptList() {
+  const userId = requireUserId();
+  if (!userId) return;
   try {
-    const res = await (electroview.rpc as any).request.listScripts({});
+    const res = await bunRpc.listScripts({ userId });
     if (res.ok && res.scripts) {
       scriptSelect.innerHTML = '<option value="">-- New Script --</option>' +
-        res.scripts.map((s: any) => `<option value="${s.id}">${s.title}</option>`).join("");
+        res.scripts.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.title)}</option>`).join("");
     }
-  } catch (e) {
-    console.error(e);
+  } catch {
+    showStatus("Could not load scripts");
   }
 }
 
@@ -215,24 +250,28 @@ scriptSelect.onchange = async () => {
     btnDelete.style.display = "none";
     return;
   }
+  const userId = requireUserId();
+  if (!userId) return;
   try {
-    const res = await (electroview.rpc as any).request.loadScript({ scriptId: scriptSelect.value });
+    const res = await bunRpc.loadScript({ userId, scriptId: scriptSelect.value });
     if (res.ok && res.script) {
       currentScriptId = res.script.id;
       textarea.value = res.script.content;
       btnDelete.style.display = "inline-block";
       updateInfo();
     }
-  } catch (e) {
-    console.error(e);
+  } catch {
+    showStatus("Could not load script");
   }
 };
 
 btnNew.onclick = async () => {
+  const userId = requireUserId();
+  if (!userId) return;
   const title = prompt("Script title?", "New Script") || "New Script";
   try {
-    const res = await (electroview.rpc as any).request.saveScript({ title, content: "" });
-    if (res.ok) {
+    const res = await bunRpc.saveScript({ userId, title, content: "" });
+    if (res.ok && res.id) {
       currentScriptId = res.id;
       textarea.value = "";
       await loadScriptList();
@@ -246,11 +285,13 @@ btnNew.onclick = async () => {
 };
 
 btnSave.onclick = async () => {
+  const userId = requireUserId();
+  if (!userId) return;
   if (!currentScriptId) {
     const title = prompt("Save as...", "My Script") || "My Script";
     try {
-      const res = await (electroview.rpc as any).request.saveScript({ title, content: textarea.value });
-      if (res.ok) {
+      const res = await bunRpc.saveScript({ userId, title, content: textarea.value });
+      if (res.ok && res.id) {
         currentScriptId = res.id;
         await loadScriptList();
         scriptSelect.value = res.id;
@@ -263,7 +304,8 @@ btnSave.onclick = async () => {
     return;
   }
   try {
-    await (electroview.rpc as any).request.updateScript({
+    await bunRpc.updateScript({
+      userId,
       scriptId: currentScriptId,
       content: textarea.value,
     });
@@ -275,9 +317,11 @@ btnSave.onclick = async () => {
 
 btnDelete.onclick = async () => {
   if (!currentScriptId) return;
+  const userId = requireUserId();
+  if (!userId) return;
   if (!confirm("Delete this script?")) return;
   try {
-    await (electroview.rpc as any).request.deleteScript({ scriptId: currentScriptId });
+    await bunRpc.deleteScript({ userId, scriptId: currentScriptId });
     currentScriptId = null;
     textarea.value = "";
     btnDelete.style.display = "none";
@@ -291,6 +335,8 @@ btnDelete.onclick = async () => {
 
 // Upload
 btnUpload.onclick = () => {
+  const userId = requireUserId();
+  if (!userId) return;
   const input = document.createElement("input");
   input.type = "file";
   input.accept = ".txt,.md";
@@ -299,8 +345,8 @@ btnUpload.onclick = () => {
     const content = await input.files[0].text();
     const title = input.files[0].name.replace(/\.[^.]+$/, "");
     try {
-      const res = await (electroview.rpc as any).request.saveScript({ title, content });
-      if (res.ok) {
+      const res = await bunRpc.saveScript({ userId, title, content });
+      if (res.ok && res.id) {
         currentScriptId = res.id;
         textarea.value = content;
         await loadScriptList();
@@ -317,19 +363,21 @@ btnUpload.onclick = () => {
 
 // Generate
 btnGenerate.onclick = async () => {
+  const userId = requireUserId();
+  if (!userId) return;
   const topic = prompt("What should the script be about?");
   if (!topic) return;
   showStatus("Generating...");
   try {
-    const res = await (electroview.rpc as any).request.generateScript({ topic });
+    const res = await bunRpc.generateScript({ userId, topic });
     if (res.ok && res.content) {
       textarea.value = res.content;
-      // Optionally auto-save as generated script
-      const saveRes = await (electroview.rpc as any).request.saveScript({
+      const saveRes = await bunRpc.saveScript({
+        userId,
         title: `Generated: ${topic}`,
         content: res.content,
       });
-      if (saveRes.ok) {
+      if (saveRes.ok && saveRes.id) {
         currentScriptId = saveRes.id;
         await loadScriptList();
         scriptSelect.value = saveRes.id;

@@ -16,6 +16,7 @@ import type { BanterConfig } from "../core/types";
 const DISABLED_CONFIG: BanterConfig = {
 	enabled: false,
 	twitchChannel: "",
+	llmProvider: "openrouter",
 	llmModel: "openrouter/free",
 	systemPrompt: "test",
 	voiceActivityGate: true,

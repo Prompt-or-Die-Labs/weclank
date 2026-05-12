@@ -1,6 +1,6 @@
 import type { LLMClient, ChatTurn, LLMResponse } from "./llm-client";
 import { BANTER_TOOLS } from "./tools";
-import { executeToolCalls, type ToolCall } from "./tool-executor";
+import { executeToolCalls, type ToolCall, type ToolExecutionPolicy } from "./tool-executor";
 
 export interface AgentToolCallRecord {
 	ts: number;
@@ -15,6 +15,7 @@ export async function runAgentToolLoop(args: {
 	systemContent: string;
 	history: ChatTurn[];
 	signal: AbortSignal;
+	policy?: ToolExecutionPolicy;
 	onTextReady(): void;
 	onToolCall(record: AgentToolCallRecord): void;
 }): Promise<string> {
@@ -44,7 +45,7 @@ export async function runAgentToolLoop(args: {
 			name: call.name,
 			args: call.args,
 		}));
-		const toolResults = await executeToolCalls(calls);
+		const toolResults = await executeToolCalls(calls, args.policy);
 		for (let i = 0; i < calls.length; i++) {
 			const call = calls[i]!;
 			const output = toolResults[i];

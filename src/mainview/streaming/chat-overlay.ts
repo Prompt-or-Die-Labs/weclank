@@ -9,6 +9,7 @@
 
 import type { ChatMessage, ChatSource } from "../banter/chat-source";
 import { TwitchChatSource } from "../banter/twitch-chat";
+import { audienceIntelligence } from "../banter/audience-intelligence";
 import type { ChatOverlayConfig, ChatOverlayPosition } from "../core/types";
 
 const PADDING = 32;
@@ -35,6 +36,7 @@ class ChatOverlay {
 		if (!this.source || changedChannel) {
 			this.source?.disconnect();
 			this.messages = [];
+			audienceIntelligence.clear();
 			this.source = new TwitchChatSource(config.channel);
 			this.source.connect().catch((err) => {
 				console.warn("[chat-overlay] failed to connect", err);
@@ -48,6 +50,7 @@ class ChatOverlay {
 		this.source?.disconnect();
 		this.source = null;
 		this.messages = [];
+		audienceIntelligence.clear();
 	}
 
 	updatePosition(position: ChatOverlayPosition): void {
@@ -75,6 +78,7 @@ class ChatOverlay {
 	 * Works even when no Twitch source is connected — useful for testing. */
 	inject(msg: ChatMessage): void {
 		this.messages.push(msg);
+		audienceIntelligence.recordMessage(msg);
 		const cap = this.config?.maxMessages ?? 6;
 		if (this.messages.length > cap) this.messages = this.messages.slice(-cap);
 	}
@@ -85,6 +89,7 @@ class ChatOverlay {
 		for await (const msg of source.messages()) {
 			if (this.source !== source) break; // we reconnected elsewhere
 			this.messages.push(msg);
+			audienceIntelligence.recordMessage(msg);
 			const cap = this.config?.maxMessages ?? 6;
 			if (this.messages.length > cap) this.messages = this.messages.slice(-cap);
 		}

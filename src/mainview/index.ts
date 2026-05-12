@@ -23,14 +23,20 @@ import { hydrateFromUser } from "./state/persistence";
 import { studio } from "./state/studio-store";
 import { initTheme } from "./components/theme";
 import { installHotkeys } from "./components/hotkeys";
-import { mountUtilityWindow } from "./components/utility-window";
+import { mountUtilityWindow, parseUtilityWindowKind, type UtilityWindowKind } from "./components/utility-window";
+import { installNativeContextMenu } from "./components/native-context-menu";
+import { SetupChecklistStrip } from "./components/setup-strip";
+import { StudioHealthBanner } from "./components/studio-health-banner";
+import { shouldOfferFirstRunWizard, openSetupWizard } from "./components/setup-wizard";
 
 async function boot(): Promise<void> {
 	initTheme();
+	installNativeContextMenu();
 	
 	// Restore user first
 	let user = await authStore.restore();
-	if (!user && !getUtilityWindowKind()) {
+	let utilityKind = parseUtilityWindowKind() ?? coerceUtilityWindowKind(getUtilityWindowKind());
+	if (!user && !utilityKind) {
 		// Only show splash if this is the main window and not logged in
 		user = await mountSplash();
 	}
@@ -43,14 +49,13 @@ async function boot(): Promise<void> {
 	// Wait for the initializeUtilityWindow RPC message (sent on dom-ready).
 	// Poll briefly so we reliably detect utility windows even if the message
 	// arrives after the first tick.
-	let utilityKind = getUtilityWindowKind();
 	for (let i = 0; i < 10 && !utilityKind; i++) {
 		await new Promise((r) => setTimeout(r, 30));
-		utilityKind = getUtilityWindowKind();
+		utilityKind = coerceUtilityWindowKind(getUtilityWindowKind());
 	}
 
-	if (utilityKind && utilityKind !== "studio") {
-		mountUtilityWindow(utilityKind as any);
+	if (utilityKind) {
+		mountUtilityWindow(utilityKind);
 		return;
 	}
 
@@ -61,7 +66,14 @@ async function boot(): Promise<void> {
 function mountShell(): void {
 	const app = document.getElementById("app");
 	if (!app) throw new Error("#app missing");
+	app.className = "app";
 	app.innerHTML = ""; // clear any auth-time content
+
+	const skip = document.createElement("a");
+	skip.className = "skip-link";
+	skip.href = "#program-main";
+	skip.textContent = "Skip to program stage";
+	app.appendChild(skip);
 
 	// Mount the offscreen renderer farm first so any participants that
 	// hydrated from persistence get their renderers attached before the
@@ -72,11 +84,20 @@ function mountShell(): void {
 	// Each component's root has the grid-area class baked in. Mounting
 	// direct to #app keeps them as direct grid children so named areas
 	// actually apply.
+	const preflight = document.createElement("div");
+	preflight.className = "app-preflight";
+	app.appendChild(preflight);
+	new StudioHealthBanner().mount(preflight);
+	new SetupChecklistStrip().mount(preflight);
+
 	new AppHeader().mount(app);
 	new ScenePanel().mount(app);
 
 	const stageWrap = document.createElement("div");
+	stageWrap.id = "program-main";
 	stageWrap.className = "stage-wrap";
+	stageWrap.setAttribute("role", "main");
+	stageWrap.setAttribute("aria-label", "Program preview and stage");
 	app.appendChild(stageWrap);
 	new StageToolbar().mount(stageWrap);
 	const stage = new StageCanvas();
@@ -95,6 +116,10 @@ function mountShell(): void {
 
 	installHotkeys();
 
+	if (shouldOfferFirstRunWizard()) {
+		queueMicrotask(() => openSetupWizard());
+	}
+
 	// Resume the transcript watcher if persistence has a path.
 	void syncTranscriptFeed();
 
@@ -110,3 +135,17 @@ function mountShell(): void {
 }
 
 document.addEventListener("DOMContentLoaded", () => void boot());
+
+function coerceUtilityWindowKind(value: string | null): UtilityWindowKind | null {
+	switch (value) {
+		case "studio":
+		case "chat":
+		case "producer":
+		case "stats":
+		case "overlay":
+		case "prompter":
+			return value;
+		default:
+			return null;
+	}
+}

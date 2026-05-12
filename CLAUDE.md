@@ -12,7 +12,7 @@ The product is a single app — splash → local login → studio. The studio co
 
 - `bun start` — run the app (`electrobun dev`)
 - `bun dev` — run with file watching
-- `bun build:canary` — production build (`electrobun build --env=canary`)
+- `bun build` / `bun build:canary` — production build (`electrobun build --env=canary`). **Releases:** merging to `main` auto-creates the next `v*` tag and triggers `.github/workflows/release.yml` (artifacts + GitHub Release). See `RELEASING.md` (`[skip release]` to skip one merge).
 - `bun test` — run the test suite
 - `bun test:watch` — tests with rerun on save
 - `bun check` — green-bar gate: typecheck **and** tests

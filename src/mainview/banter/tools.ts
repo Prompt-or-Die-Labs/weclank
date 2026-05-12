@@ -125,6 +125,27 @@ export const BANTER_TOOLS: ToolDefinition[] = [
 			},
 		},
 	},
+	{
+		type: "function",
+		function: {
+			name: "generate_broadcast_image",
+			description:
+				"Generate a still image via OpenAI Images (DALL-E 3) using the user's saved OpenAI API key, and show it on the broadcast as a picture overlay (same slot as QR graphics). Use for stream graphics, memes, or illustrated explanations. Costs API credits — use sparingly.",
+			parameters: {
+				type: "object",
+				properties: {
+					prompt: { type: "string", description: "What to generate — be specific and safe for broadcast." },
+					size: {
+						type: "string",
+						enum: ["1024x1024", "1792x1024", "1024x1792"],
+						description: "Canvas shape. Default 1024x1024.",
+					},
+					title: { type: "string", description: "Short caption under the image (optional)." },
+				},
+				required: ["prompt"],
+			},
+		},
+	},
 ];
 
 // Typed shapes the executor sees after `parseToolInvocation` validates the
@@ -147,13 +168,20 @@ export interface PlayMusicArgs {
 	style?: string;
 }
 
+export interface GenerateBroadcastImageArgs {
+	prompt: string;
+	size?: "1024x1024" | "1792x1024" | "1024x1792";
+	title?: string;
+}
+
 export type ToolInvocation =
 	| { name: "show_overlay"; args: ShowOverlayArgs }
 	| { name: "remove_overlay"; args: { id: OverlayId } }
 	| { name: "list_overlays"; args: Record<string, never> }
 	| { name: "play_music"; args: PlayMusicArgs }
 	| { name: "stop_music"; args: Record<string, never> }
-	| { name: "set_music_volume"; args: { volume: number } };
+	| { name: "set_music_volume"; args: { volume: number } }
+	| { name: "generate_broadcast_image"; args: GenerateBroadcastImageArgs };
 
 export type ParseResult =
 	| { ok: true; invocation: ToolInvocation }
@@ -206,6 +234,17 @@ export function parseToolInvocation(name: string, raw: unknown): ParseResult {
 			const volume = numberOr(args["volume"]);
 			if (volume === undefined) return fail("set_music_volume: missing or invalid volume");
 			return ok({ name, args: { volume } });
+		}
+		case "generate_broadcast_image": {
+			const prompt = stringOr(args["prompt"]);
+			if (!prompt) return fail("generate_broadcast_image: missing prompt");
+			const size = args["size"];
+			const okSize =
+				size === "1024x1024" || size === "1792x1024" || size === "1024x1792" ? size : undefined;
+			return ok({
+				name,
+				args: { prompt, size: okSize, title: stringOr(args["title"]) },
+			});
 		}
 		default:
 			return fail(`unknown tool: ${name}`);

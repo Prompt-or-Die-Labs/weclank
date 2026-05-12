@@ -27,6 +27,21 @@ const rpc = Electroview.defineRPC<PhotoBoothRPC>({
 			utilityWindowClosed: ({ id, kind }) => {
 				console.log(`[RPC] Utility window closed: ${kind} (id: ${id})`);
 			},
+			nativeOpenSettings: () => {
+				void import("./components/settings-dialog").then(({ openSettingsDialog }) => openSettingsDialog());
+			},
+			nativeOpenHelp: () => {
+				void import("./components/help-dialog").then(({ openHelpDialog }) => void openHelpDialog());
+			},
+			nativeOpenRtmp: () => {
+				void import("./streaming/rtmp-config-dialog").then(({ pickRtmpDestination }) => void pickRtmpDestination({ intent: "settings" }));
+			},
+			nativeToggleRecording: () => {
+				void toggleRecordingFromNativeMenu();
+			},
+			nativeToggleLive: () => {
+				document.getElementById("go-live")?.click();
+			},
 		},
 	},
 });
@@ -40,4 +55,28 @@ export const bunRpc = electroview.rpc!.request;
 // Export utility window kind for use in index.ts
 export function getUtilityWindowKind(): string | null {
 	return utilityWindowKind;
+}
+
+async function toggleRecordingFromNativeMenu(): Promise<void> {
+	const [{ localRecorder }, { toast }, { userMessageFor }] = await Promise.all([
+		import("./streaming/recorder"),
+		import("./components/overlays"),
+		import("./core/errors"),
+	]);
+	if (localRecorder.isRecording) {
+		try {
+			const result = await localRecorder.stop();
+			if (result.path) toast(`Saved to ${result.path}`, "success");
+			else if (result.canceled) toast("Recording discarded");
+		} catch (err) {
+			toast(`Stop failed: ${userMessageFor(err)}`, "error");
+		}
+		return;
+	}
+	try {
+		await localRecorder.start();
+		toast("Recording started", "success");
+	} catch (err) {
+		toast(`Recording failed: ${userMessageFor(err)}`, "error");
+	}
 }

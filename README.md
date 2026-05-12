@@ -72,20 +72,25 @@ Electrobun desktop app — Bun runs the main process (SQLite, ffmpeg, file dialo
 ## Build
 
 ```sh
-bun build:canary         # production canary build
+bun build                # production canary bundle (alias of build:canary)
+bun build:canary
 ```
 
 Output lands in `build/` — gitignored. Hardware encoder auto-detection means the same binary works across macOS / Linux / Windows.
 
+## Releases
+
+Merging to **`main`** automatically creates the next **`v*`** tag (unless the merge commit says **`[skip release]`**), which triggers CI to build macOS / Linux / Windows artifacts and publish a **GitHub Release**. You can also run **Actions → Auto-tag release** manually or push a tag by hand. Details: [RELEASING.md](./RELEASING.md).
+
 ## Test
 
 ```sh
-bun test                 # 73 tests across 12 files in ~700ms
+bun test                 # co-located *.test.ts
 bun test:watch           # rerun on save
 bun lint                 # Biome lint (no formatter — see CONTRIBUTING)
 ```
 
-CI runs `bun check` on every push and PR via `.github/workflows/ci.yml`.
+CI runs `bun check` on every push and PR via `.github/workflows/ci.yml`. Pushes to `main` run `.github/workflows/auto-release-tag.yml` (then `release.yml` when a new tag appears).
 
 ## License
 

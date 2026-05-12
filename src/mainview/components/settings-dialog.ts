@@ -1,4 +1,5 @@
 import { connectOpenRouterOAuth, OPENROUTER_KEY } from "../auth/openrouter-oauth";
+import { openOpenAiApiKeyDialog, OPENAI_API_KEY } from "../auth/openai-api";
 import { hasSecret } from "../auth/secrets-cache";
 import { userMessageFor } from "../core/errors";
 import type { StreamQuality } from "../core/types";
@@ -11,8 +12,11 @@ import { getTheme, setTheme, type ThemeMode } from "./theme";
 import { Modal, toast } from "./overlays";
 import { escapeAttr, escapeHtml } from "./primitives";
 import type { WorkspaceAppId } from "../../bun/workspace-apps";
+import { serializeState } from "../state/persistence";
+import type { StudioFocusMode } from "../core/types";
+import { openSceneImportDialog } from "./scene-import-dialog";
 
-type UtilityKind = "studio" | "chat" | "producer" | "stats" | "overlay";
+type UtilityKind = "studio" | "chat" | "producer" | "stats" | "overlay" | "prompter";
 
 export function openSettingsDialog(): void {
 	const body = document.createElement("div");
@@ -45,6 +49,7 @@ export function openSettingsDialog(): void {
 			.catch((err) => toast(`Screen capture failed: ${userMessageFor(err)}`, "error"));
 	});
 	body.querySelector<HTMLButtonElement>("[data-action=openrouter]")?.addEventListener("click", () => void connectOpenRouter());
+	body.querySelector<HTMLButtonElement>("[data-action=openai-key]")?.addEventListener("click", () => void openOpenAiApiKeyDialog());
 	body.querySelector<HTMLButtonElement>("[data-action=assistant]")?.addEventListener("click", () => {
 		void createParticipantFromKind("text")
 			.then((id) => { if (id) toast("Text assistant added", "success"); })
@@ -63,10 +68,21 @@ export function openSettingsDialog(): void {
 		const checked = (event.currentTarget as HTMLInputElement).checked;
 		void setWindowMode({ visibleOnAllWorkspaces: checked });
 	});
+	void hydrateWindowMode(body);
 	body.querySelectorAll<HTMLButtonElement>("[data-window]").forEach((btn) => {
 		btn.addEventListener("click", () => {
 			const kind = btn.dataset["window"] as UtilityKind;
 			void openUtilityWindow(kind);
+		});
+	});
+	body.querySelector<HTMLButtonElement>("[data-action=export-state]")?.addEventListener("click", () => void copyProgramState());
+	body.querySelector<HTMLButtonElement>("[data-action=import-scenes]")?.addEventListener("click", () => {
+		modal.close();
+		openSceneImportDialog();
+	});
+	body.querySelectorAll<HTMLInputElement>('input[name="focusMode"]').forEach((radio) => {
+		radio.addEventListener("change", () => {
+			if (radio.checked) studio.setStudioPrefs({ focusMode: radio.value as StudioFocusMode });
 		});
 	});
 	body.querySelectorAll<HTMLButtonElement>("[data-workspace-app]").forEach((btn) => {
@@ -83,6 +99,8 @@ function renderSettings(): string {
 	const theme = getTheme();
 	const quality = studio.state.stream.quality;
 	const openRouterConnected = hasSecret(OPENROUTER_KEY);
+	const openAiKeySaved = hasSecret(OPENAI_API_KEY);
+	const focusMode = studio.state.studioPrefs?.focusMode ?? "full";
 	const workspaceApps = [
 		["windsurf", "Windsurf"],
 		["antigravity", "Antigravity"],
@@ -140,12 +158,57 @@ function renderSettings(): string {
 		<section class="settings-section">
 			<div class="settings-section__head">
 				<h3>AI Chat & Agents</h3>
-				<p>OpenRouter is ${openRouterConnected ? "connected" : "not connected"}. Text assistants answer in chat and producer windows; voice co-hosts speak on stream.</p>
+				<p>OpenRouter is ${openRouterConnected ? "connected" : "not connected"} (TTS, speech-to-text, default banter LLM). OpenAI API key is ${openAiKeySaved ? "saved" : "not set"} — optional; use it when an agent's banter LLM provider is OpenAI.</p>
 			</div>
-			<div class="settings-grid settings-grid--three">
+			<div class="settings-grid settings-grid--two">
 				<button type="button" class="settings-action" data-action="openrouter">Connect OpenRouter</button>
+				<button type="button" class="settings-action" data-action="openai-key">${openAiKeySaved ? "Update OpenAI API key" : "Save OpenAI API key"}</button>
+			</div>
+			<div class="settings-grid settings-grid--two">
 				<button type="button" class="settings-action" data-action="assistant">Add text assistant</button>
 				<button type="button" class="settings-action" data-action="voice-agent">Add voice co-host</button>
+			</div>
+		</section>
+
+		<section class="settings-section">
+			<div class="settings-section__head">
+				<h3>Studio focus</h3>
+				<p>Broadcast-first hides optional AI nudges until you connect keys. Full studio surfaces agents, music, and transcript tools immediately.</p>
+			</div>
+			<div class="settings-grid settings-grid--two">
+				<label class="settings-choice">
+					<input type="radio" name="focusMode" value="broadcast"${focusMode === "broadcast" ? " checked" : ""} />
+					<span>Go live first</span>
+				</label>
+				<label class="settings-choice">
+					<input type="radio" name="focusMode" value="full"${focusMode === "full" ? " checked" : ""} />
+					<span>Full studio</span>
+				</label>
+			</div>
+		</section>
+
+		<section class="settings-section">
+			<div class="settings-section__head">
+				<h3>Backup & export</h3>
+				<p>Copy a JSON snapshot of scenes, participants (without live media), and stream settings — or import scenes from a <code>weclankScenePack</code> / export fragment (sources are matched to participants in this session).</p>
+			</div>
+			<div class="settings-actions-row">
+				<button type="button" class="settings-action" data-action="export-state">Copy program state JSON</button>
+				<button type="button" class="settings-action" data-action="import-scenes">Import scenes…</button>
+			</div>
+		</section>
+
+		<section class="settings-section">
+			<div class="settings-section__head">
+				<h3>Privacy & local data</h3>
+				<p>API keys and RTMP stream keys are stored in plaintext inside your account's SQLite file on this computer — the same threat model as your shell history. Full-disk encryption (FileVault, BitLocker, LUKS) is the practical mitigation. Passwords are hashed with argon2id; there is no cloud password reset.</p>
+			</div>
+		</section>
+
+		<section class="settings-section">
+			<div class="settings-section__head">
+				<h3>Product scope (MVP)</h3>
+				<p>Weclank is a local-first compositor with RTMP egress and AI tooling — not a full OBS plugin ecosystem yet. There is no NDI ingest, no cloud sync, and advanced audio routing is intentionally minimal compared to dedicated broadcast suites.</p>
 			</div>
 		</section>
 
@@ -159,7 +222,7 @@ function renderSettings(): string {
 				<label><input type="checkbox" data-field="all-workspaces" /> <span>Show on all workspaces</span></label>
 			</div>
 			<div class="settings-grid settings-grid--five">
-				${(["studio", "chat", "producer", "stats", "overlay"] as UtilityKind[]).map((kind) => `
+				${(["studio", "chat", "producer", "stats", "overlay", "prompter"] as UtilityKind[]).map((kind) => `
 					<button type="button" class="settings-action" data-window="${kind}">${escapeHtml(windowLabel(kind))}</button>
 				`).join("")}
 			</div>
@@ -181,6 +244,17 @@ function renderSettings(): string {
 			<button type="button" data-action="close" class="primary">Done</button>
 		</div>
 	`;
+}
+
+async function copyProgramState(): Promise<void> {
+	const json = JSON.stringify(serializeState(studio.state), null, 2);
+	try {
+		await navigator.clipboard.writeText(json);
+		toast("Program state copied to clipboard", "success");
+	} catch {
+		toast("Could not access clipboard — check the console", "error");
+		console.info("[export]", json);
+	}
 }
 
 async function toggleRecording(): Promise<void> {
@@ -218,10 +292,26 @@ async function setWindowMode(patch: { alwaysOnTop?: boolean; visibleOnAllWorkspa
 	}
 }
 
+async function hydrateWindowMode(body: HTMLElement): Promise<void> {
+	try {
+		const mode = await bunRpc.getStudioWindowMode({});
+		const alwaysOnTop = body.querySelector<HTMLInputElement>("[data-field=always-on-top]");
+		const allWorkspaces = body.querySelector<HTMLInputElement>("[data-field=all-workspaces]");
+		if (alwaysOnTop) alwaysOnTop.checked = mode.alwaysOnTop;
+		if (allWorkspaces) allWorkspaces.checked = mode.visibleOnAllWorkspaces;
+	} catch (err) {
+		toast(`Window mode status failed: ${userMessageFor(err)}`, "error");
+	}
+}
+
 async function openUtilityWindow(kind: UtilityKind): Promise<void> {
 	try {
 		const clickThrough = kind === "overlay";
-		const result = await bunRpc.openStudioUtilityWindow({ kind, clickThrough, alwaysOnTop: kind === "overlay" });
+		const result = await bunRpc.openStudioUtilityWindow({
+			kind,
+			clickThrough,
+			alwaysOnTop: kind === "overlay" || kind === "prompter",
+		});
 		if (!result.ok) throw new Error(result.error ?? "Window failed");
 		toast(`${windowLabel(kind)} opened`, "success");
 	} catch (err) {
@@ -254,5 +344,6 @@ function windowLabel(kind: UtilityKind): string {
 		case "producer": return "Producer";
 		case "stats": return "Monitor";
 		case "overlay": return "Overlay";
+		case "prompter": return "Teleprompter";
 	}
 }

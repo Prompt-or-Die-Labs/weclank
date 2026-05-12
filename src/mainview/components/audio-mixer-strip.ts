@@ -13,7 +13,7 @@ import { Component } from "../core/component";
 import { studio } from "../state/studio-store";
 import { audioMixer } from "../streaming/audio-mixer";
 import type { Participant } from "../core/types";
-import { escapeHtml } from "./primitives";
+import { escapeHtml, escapeAttr } from "./primitives";
 
 interface State {
 	participants: Participant[];
@@ -53,7 +53,7 @@ export class AudioMixerStrip extends Component<State> {
 					<canvas class="mixer__vu" width="14" height="64" data-vu></canvas>
 					<input class="mixer__gain" type="range" min="0" max="150" value="${gain}" data-gain orient="vertical" aria-label="Gain for ${escapeHtml(p.displayName)}" />
 				</div>
-				<button class="mixer__mute ${p.muted ? "is-muted" : ""}" data-mute aria-pressed="${p.muted ? "true" : "false"}" title="Mute">M</button>
+				<button class="mixer__mute ${p.muted ? "is-muted" : ""}" data-mute aria-pressed="${p.muted ? "true" : "false"}" title="Mute" aria-label="${escapeAttr(`Mute ${p.displayName}`)}">M</button>
 				<div class="mixer__name" title="${escapeHtml(p.displayName)}">${escapeHtml(p.displayName)}</div>
 			</div>
 		`;

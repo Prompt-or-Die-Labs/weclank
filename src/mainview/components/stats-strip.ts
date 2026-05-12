@@ -10,6 +10,7 @@ import { studio } from "../state/studio-store";
 import { bunRpc } from "../rpc";
 import { streamEngine } from "../streaming/stream-engine";
 import { banterEngine } from "../banter/banter-engine";
+import { micTranscriber } from "../transcription/mic-transcriber";
 
 interface State {
 	live: boolean;
@@ -20,6 +21,7 @@ interface State {
 	timeSeconds: number;
 	bantering: number;
 	transcriptOn: boolean;
+	sttCostUsd: number;
 }
 
 export class StatsStrip extends Component<State> {
@@ -36,6 +38,7 @@ export class StatsStrip extends Component<State> {
 			timeSeconds: 0,
 			bantering: banterEngine.sessionCount(),
 			transcriptOn: !!studio.state.transcript?.enabled,
+			sttCostUsd: micTranscriber.getStats().cumulativeCostUsd,
 		});
 		studio.select(
 			(s) => ({ live: s.stream.live, quality: s.stream.quality }),
@@ -53,17 +56,28 @@ export class StatsStrip extends Component<State> {
 
 	protected template(): string {
 		const live = this.state.live;
+		const stt =
+			this.state.sttCostUsd > 0.0005
+				? `<span class="stats-cell stats-cell--subtle">STT ≈ $${this.state.sttCostUsd.toFixed(3)}</span>`
+				: "";
 		return `
-			<span class="stats-cell ${live ? "stats-cell--live" : ""}">
-				<span class="stats-dot ${live ? "stats-dot--live" : ""}"></span>
-				${live ? "LIVE" : "IDLE"} · ${this.state.quality}
+			<span class="stats-cell stats-cell--group">
+				<span class="stats-cell__label">Broadcast</span>
+				<span class="stats-cell ${live ? "stats-cell--live" : ""}">
+					<span class="stats-dot ${live ? "stats-dot--live" : ""}"></span>
+					${live ? "LIVE" : "IDLE"} · ${this.state.quality}
+				</span>
+				${live ? `<span class="stats-cell">${formatDuration(this.state.timeSeconds)}</span>` : ""}
+				${live ? `<span class="stats-cell">${this.state.bitrateKbps.toFixed(0)} kbps</span>` : ""}
+				${live ? `<span class="stats-cell">${this.state.droppedFrames} dropped</span>` : ""}
 			</span>
-			${live ? `<span class="stats-cell">${formatDuration(this.state.timeSeconds)}</span>` : ""}
-			${live ? `<span class="stats-cell">${this.state.bitrateKbps.toFixed(0)} kbps</span>` : ""}
-			${live ? `<span class="stats-cell">${this.state.droppedFrames} dropped</span>` : ""}
-			<span class="stats-cell">${this.state.fps.toFixed(0)} fps</span>
-			<span class="stats-cell">Agents · ${this.state.bantering}</span>
-			<span class="stats-cell stats-cell--right">${this.state.transcriptOn ? "Transcript ON" : "Transcript OFF"}</span>
+			<span class="stats-cell stats-cell--group">
+				<span class="stats-cell__label">Studio</span>
+				<span class="stats-cell">${this.state.fps.toFixed(0)} fps preview</span>
+				<span class="stats-cell">Agents · ${this.state.bantering}</span>
+				${stt}
+				<span class="stats-cell stats-cell--right">${this.state.transcriptOn ? "Transcript ON" : "Transcript OFF"}</span>
+			</span>
 		`;
 	}
 
@@ -72,8 +86,13 @@ export class StatsStrip extends Component<State> {
 		const measure = (): void => {
 			const fps = streamEngine.measuredFps();
 			const bantering = banterEngine.sessionCount();
-			if (Math.abs(fps - this.state.fps) > 0.5 || bantering !== this.state.bantering) {
-				this.setState({ fps, bantering });
+			const sttCostUsd = micTranscriber.getStats().cumulativeCostUsd;
+			if (
+				Math.abs(fps - this.state.fps) > 0.5 ||
+				bantering !== this.state.bantering ||
+				Math.abs(sttCostUsd - this.state.sttCostUsd) > 0.0001
+			) {
+				this.setState({ fps, bantering, sttCostUsd });
 			}
 			this.rafTick = requestAnimationFrame(measure);
 		};

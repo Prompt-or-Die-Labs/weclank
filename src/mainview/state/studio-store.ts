@@ -8,14 +8,27 @@ import { disposeTTSProvider } from "../tts/registry";
 import { banterEngine } from "../banter/banter-engine";
 import { chatOverlay } from "../streaming/chat-overlay";
 import { audioMixer } from "../streaming/audio-mixer";
-import { participantId, sceneId, mintId } from "../core/ids";
+import { participantId, sceneId, mintId, showSegmentId } from "../core/ids";
 import { PersistenceError } from "../core/errors";
 import { defaultSourcePlacement, reorderSourceToTarget } from "./scene-composition";
+import {
+	addSegment,
+	advanceSegment,
+	completeSegment,
+	createDefaultRunOfShow,
+	createSegment,
+	removeSegment,
+	startSegment,
+	updateSegment,
+} from "../producer/run-of-show";
 import type { ParticipantId, SceneId } from "../core/ids";
 import type {
 	Participant,
+	RunOfShowState,
 	Scene,
+	ShowSegment,
 	SourcePlacement,
+	StudioPrefs,
 	StudioState,
 	StreamConfig,
 	ChatOverlayConfig,
@@ -87,10 +100,12 @@ const initial: StudioState = {
 	activeSceneId: SOLO_CAM_SCENE.id,
 	participants: initialParticipants,
 	stream: DEFAULT_STREAM,
+	runOfShow: createDefaultRunOfShow(),
 	overlays: {},
 	streamOverlays: [],
 	music: { volume: 0.4, current: null },
 	focusedParticipantId: null,
+	studioPrefs: { focusMode: "full" },
 };
 
 class StudioStore extends Store<StudioState> {
@@ -118,7 +133,11 @@ class StudioStore extends Store<StudioState> {
 	installRestored(restored: Partial<StudioState> | null): void {
 		if (!restored) return;
 		this.participantCleanups.clear();
-		this.set({ ...initial, ...restored });
+		const mergedPrefs: StudioPrefs = {
+			...initial.studioPrefs,
+			...restored.studioPrefs,
+		};
+		this.set({ ...initial, ...restored, studioPrefs: mergedPrefs });
 
 		for (const rawId of Object.keys(restored.participants ?? {})) {
 			const id = participantId(rawId);
@@ -198,6 +217,13 @@ class StudioStore extends Store<StudioState> {
 		};
 		this.set((s) => ({ scenes: [...s.scenes, copy] }));
 		return copy;
+	}
+
+	/** Append validated imported scenes (already minted ids). Activates the first import. */
+	appendImportedScenes(scenes: Scene[]): void {
+		if (scenes.length === 0) return;
+		const first = scenes[0]!.id;
+		this.set((s) => ({ scenes: [...s.scenes, ...scenes], activeSceneId: first }));
 	}
 
 	deleteScene(id: SceneId): void {
@@ -391,6 +417,35 @@ class StudioStore extends Store<StudioState> {
 		this.set((s) => ({ stream: { ...s.stream, ...patch } }));
 	}
 
+	addRunSegment(): void {
+		const segment = createSegment("New segment", 300, mintId("segment", showSegmentId));
+		this.set((s) => ({ runOfShow: addSegment(s.runOfShow, segment) }));
+	}
+
+	updateRunSegment(id: ShowSegment["id"], patch: Partial<Pick<ShowSegment, "title" | "durationSec" | "notes">>): void {
+		this.set((s) => ({ runOfShow: updateSegment(s.runOfShow, id, patch) }));
+	}
+
+	deleteRunSegment(id: ShowSegment["id"]): void {
+		this.set((s) => ({ runOfShow: removeSegment(s.runOfShow, id) }));
+	}
+
+	startRunSegment(id: ShowSegment["id"]): void {
+		this.set((s) => ({ runOfShow: startSegment(s.runOfShow, id, Date.now()) }));
+	}
+
+	completeRunSegment(id: ShowSegment["id"]): void {
+		this.set((s) => ({ runOfShow: completeSegment(s.runOfShow, id, Date.now()) }));
+	}
+
+	advanceRunSegment(): void {
+		this.set((s) => ({ runOfShow: advanceSegment(s.runOfShow, Date.now()) }));
+	}
+
+	resetRunOfShow(runOfShow: RunOfShowState = createDefaultRunOfShow()): void {
+		this.set({ runOfShow });
+	}
+
 	setChatOverlay(config: ChatOverlayConfig): void {
 		this.set((s) => ({ overlays: { ...s.overlays, chat: config } }));
 		// Side-effect into the renderer immediately so the overlay reflects
@@ -434,6 +489,16 @@ class StudioStore extends Store<StudioState> {
 	focusParticipant(id: ParticipantId | null): void {
 		this.set({ focusedParticipantId: id });
 	}
+
+	setStudioPrefs(patch: Partial<StudioPrefs>): void {
+		this.set((s) => ({
+			studioPrefs: { ...defaultStudioPrefs(s.studioPrefs), ...patch },
+		}));
+	}
+}
+
+function defaultStudioPrefs(p?: StudioPrefs): StudioPrefs {
+	return { focusMode: "full", ...p };
 }
 
 export const studio = new StudioStore();

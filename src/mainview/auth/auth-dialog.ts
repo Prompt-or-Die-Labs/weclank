@@ -19,28 +19,53 @@ export function openAuthDialog(initialTab: Tab = "login"): Promise<{ id: UserId;
 		body.className = "auth-dialog";
 
 		const render = (): void => {
+			const loginSel = tab === "login";
+			const signupSel = tab === "signup";
 			body.innerHTML = `
-				<div class="auth-dialog__tabs">
-					<button class="auth-dialog__tab${tab === "login" ? " is-active" : ""}" data-tab="login">Sign in</button>
-					<button class="auth-dialog__tab${tab === "signup" ? " is-active" : ""}" data-tab="signup">Create account</button>
+				<div class="auth-dialog__tabs" role="tablist" aria-label="Account">
+					<button type="button" class="auth-dialog__tab${loginSel ? " is-active" : ""}" role="tab" id="auth-tab-login" aria-selected="${loginSel}" aria-controls="auth-panel" tabindex="${loginSel ? "0" : "-1"}" data-tab="login">Sign in</button>
+					<button type="button" class="auth-dialog__tab${signupSel ? " is-active" : ""}" role="tab" id="auth-tab-signup" aria-selected="${signupSel}" aria-controls="auth-panel" tabindex="${signupSel ? "0" : "-1"}" data-tab="signup">Create account</button>
 				</div>
-				<label class="auth-dialog__row">
-					<span>Username</span>
-					<input type="text" data-field="username" autocomplete="username" autocapitalize="off" />
-				</label>
-				<label class="auth-dialog__row">
-					<span>Password</span>
-					<input type="password" data-field="password" autocomplete="${tab === "login" ? "current-password" : "new-password"}" />
-				</label>
-				<div class="auth-dialog__error" data-region="error" hidden></div>
-				<div class="auth-dialog__actions">
-					<button type="button" data-action="submit" class="primary">${tab === "login" ? "Sign in" : "Create account"}</button>
+				<div id="auth-panel" class="auth-dialog__panel" role="tabpanel" tabindex="0" aria-labelledby="${tab === "login" ? "auth-tab-login" : "auth-tab-signup"}">
+					<label class="auth-dialog__row">
+						<span>Username</span>
+						<input type="text" data-field="username" autocomplete="username" autocapitalize="off" />
+					</label>
+					<label class="auth-dialog__row">
+						<span>Password</span>
+						<input type="password" data-field="password" autocomplete="${tab === "login" ? "current-password" : "new-password"}" />
+					</label>
+					<div class="auth-dialog__error" data-region="error" role="alert" hidden></div>
+					<div class="auth-dialog__actions">
+						<button type="button" data-action="submit" class="primary">${tab === "login" ? "Sign in" : "Create account"}</button>
+					</div>
+					<p class="auth-dialog__hint">Local accounts only — your password and keys never leave this machine.</p>
 				</div>
-				<p class="auth-dialog__hint">Local accounts only — your password and keys never leave this machine.</p>
 			`;
-			body.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((btn) =>
-				btn.addEventListener("click", () => { tab = btn.dataset["tab"] as Tab; render(); }),
-			);
+
+			const switchTab = (next: Tab): void => {
+				tab = next;
+				render();
+				body.querySelector<HTMLButtonElement>(`[data-tab="${next}"]`)?.focus();
+			};
+
+			body.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((btn) => {
+				btn.addEventListener("click", () => switchTab(btn.dataset["tab"] as Tab));
+				btn.addEventListener("keydown", (e) => {
+					const ev = e as KeyboardEvent;
+					if (ev.key === "ArrowRight" || ev.key === "ArrowLeft") {
+						ev.preventDefault();
+						switchTab(btn.dataset["tab"] === "login" ? "signup" : "login");
+					} else if (ev.key === "Home") {
+						ev.preventDefault();
+						switchTab("login");
+					} else if (ev.key === "End") {
+						ev.preventDefault();
+						switchTab("signup");
+					}
+				});
+			});
+
 			body.querySelector<HTMLButtonElement>("[data-action=submit]")!.addEventListener("click", submit);
 			body.querySelector<HTMLInputElement>("[data-field=password]")!.addEventListener("keydown", (e) => {
 				if ((e as KeyboardEvent).key === "Enter") submit();
@@ -72,6 +97,7 @@ export function openAuthDialog(initialTab: Tab = "login"): Promise<{ id: UserId;
 		const modal = new Modal({
 			title: "Weclank",
 			body,
+			initialFocusSelector: "[data-field=username]",
 			onClose: () => {
 				if (!resolved) reject(new Error("auth-dialog-closed"));
 			},

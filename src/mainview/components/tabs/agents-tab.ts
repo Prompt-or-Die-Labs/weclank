@@ -13,6 +13,7 @@ import { studio } from "../../state/studio-store";
 import type { Participant, SourceKind } from "../../core/types";
 import { audioMixer } from "../../streaming/audio-mixer";
 import { banterEngine, type BanterPhase, type ToolCallRecord } from "../../banter/banter-engine";
+import { runtimeAutonomy, runtimeToolPermissions } from "../../banter/tool-policy";
 import { pickBanterConfig } from "../../banter/config-dialog";
 import { pickTTSConfig } from "../../tts/config-dialog";
 import { initVoiceRoute, speakWithVoiceRoute } from "../../tts/voice-route";
@@ -90,6 +91,7 @@ export class AgentsTab extends Component<State> {
 				: p.banter?.proactiveOnTranscript
 					? "Proactive on transcript"
 					: "Manual mode";
+		const policyLine = p.banter ? policySummary(p.banter) : "No agent policy";
 
 		const log = banterOn ? banterEngine.getToolCallLog(p.id).slice(-3).reverse() : [];
 		return `
@@ -104,6 +106,7 @@ export class AgentsTab extends Component<State> {
 							${roleName ? `<span class="agent-card__role-badge">${escapeHtml(roleName)}</span>` : ""}
 						</div>
 						<div class="agent-card__sub">${escapeHtml(subline)}</div>
+						<div class="agent-card__policy">${escapeHtml(policyLine)}</div>
 					</div>
 					<span class="agent-card__chip agent-card__chip--${banterOn ? phase : "off"}">${phaseLabel}</span>
 				</header>
@@ -306,6 +309,15 @@ export class AgentsTab extends Component<State> {
 
 function collectAgents(participants: Record<string, Participant>): Participant[] {
 	return Object.values(participants).filter((p) => p.isAgent);
+}
+
+function policySummary(config: NonNullable<Participant["banter"]>): string {
+	const permissions = runtimeToolPermissions(config);
+	const enabled = [
+		permissions.controlOverlays ? "overlays" : "",
+		permissions.controlMusic ? "music" : "",
+	].filter(Boolean).join("+") || "no tools";
+	return `${runtimeAutonomy(config)} · ${enabled}`;
 }
 
 function readAmp(id: string): number {

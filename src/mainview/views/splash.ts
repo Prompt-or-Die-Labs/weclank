@@ -17,6 +17,7 @@ export function mountSplash(): Promise<{ id: UserId; username: string }> {
 			<div class="splash__inner">
 				<div class="splash__brand">WE<span>/</span>CLANK</div>
 				<p class="splash__tagline">Open-source streaming studio with AI co-hosts. Local-first, single binary, your machine, your data.</p>
+				<p class="splash__badge">Desktop app · macOS / Linux / Windows · RTMP requires ffmpeg on your PATH</p>
 				<div class="splash__cta">
 					<button class="primary" data-action="signin">Sign in</button>
 					<button class="secondary" data-action="signup">Create account</button>

@@ -6,6 +6,7 @@
 //   Cmd/Ctrl + 1..9      → activate scene N (0-indexed)
 //   Cmd/Ctrl + Shift + L → trigger AppHeader's Go Live button
 //   Cmd/Ctrl + Shift + R → toggle local recording
+//   Cmd/Ctrl + K         → command palette
 //   [ / ]                → cycle right-sidebar tab
 
 import { studio } from "../state/studio-store";
@@ -44,6 +45,13 @@ function handleKeyDown(e: KeyboardEvent): void {
 
 	const mod = e.metaKey || e.ctrlKey;
 	if (!mod) return;
+
+	// Cmd/Ctrl + K → command palette (no shift — keeps parity with VS Code / Linear).
+	if (!e.shiftKey && e.key.toLowerCase() === "k") {
+		e.preventDefault();
+		void import("./command-palette").then(({ openCommandPalette }) => openCommandPalette());
+		return;
+	}
 
 	// Cmd/Ctrl + 1..9 → activate the Nth scene.
 	const digit = Number.parseInt(e.key, 10);

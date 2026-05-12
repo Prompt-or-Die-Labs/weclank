@@ -88,17 +88,17 @@ export class StageToolbar extends Component<State> {
 					</button>
 				`).join("")}
 			</div>
-			<div class="stage-toolbar__group stage-toolbar__group--right">
+			<div class="stage-toolbar__group stage-toolbar__group--right" role="toolbar" aria-label="Host controls">
 				${IconButton({
 					icon: this.state.hostMuted ? Icons.micOff(14) : Icons.mic(14),
 					variant: this.state.hostMuted ? "ghost" : "ghost",
-					ariaLabel: this.state.hostMuted ? "Unmute" : "Mute",
+					ariaLabel: this.state.hostMuted ? "Unmute host microphone" : "Mute host microphone",
 					dataset: { action: "mic" },
 				})}
 				${IconButton({
 					icon: this.state.hostCameraOff ? Icons.cameraOff(14) : Icons.camera(14),
 					variant: this.state.hostCameraOff ? "ghost" : "ghost",
-					ariaLabel: "Camera",
+					ariaLabel: this.state.hostCameraOff ? "Turn on host camera" : "Turn off host camera",
 					dataset: { action: "camera" },
 				})}
 				${IconButton({ icon: Icons.screen(14), variant: "ghost", ariaLabel: "Share screen", dataset: { action: "screen" } })}
@@ -140,7 +140,7 @@ export class StageToolbar extends Component<State> {
 				}).catch((err) => toast(`Screen capture failed: ${userMessageFor(err)}`, "error"));
 				break;
 			case "prompter":
-				void (bunRpc as any)['openStudioUtilityWindow']({ kind: "prompter", clickThrough: false, alwaysOnTop: true });
+				void bunRpc.openStudioUtilityWindow({ kind: "prompter", clickThrough: false, alwaysOnTop: true });
 				break;
 			case "add":
 				this.openAddSourceMenu(anchor);

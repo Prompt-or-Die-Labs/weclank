@@ -32,15 +32,15 @@ export class ScenePanel extends Component<State> {
 
 	protected template(): string {
 		return `
-			<div class="scene-panel__section scene-panel__section--scenes">
+			<nav class="scene-panel__section scene-panel__section--scenes" aria-label="Scenes">
 				<div class="scene-panel__head">
-					<span class="section-header">Scenes</span>
+					<span class="section-header" id="scene-panel-heading">Scenes</span>
 					<button class="scene-panel__add" id="add-scene" title="Add scene" aria-label="Add scene">${Icons.plus(12)}</button>
 				</div>
-				<div class="scene-list">
+				<div class="scene-list" role="list" aria-labelledby="scene-panel-heading">
 					${this.state.scenes.map((scene) => this.renderItem(scene)).join("")}
 				</div>
-			</div>
+			</nav>
 			<div class="scene-panel__section scene-panel__section--sources" data-sources-mount></div>
 		`;
 	}
@@ -73,7 +73,7 @@ export class ScenePanel extends Component<State> {
 		const active = scene.id === this.state.activeSceneId;
 		const visible = scene.sources.filter((s) => s.visible).length;
 		return `
-			<div class="scene-item${active ? " scene-item--active" : ""}" data-scene-id="${scene.id}" draggable="true">
+			<div class="scene-item${active ? " scene-item--active" : ""}" data-scene-id="${scene.id}" draggable="true" role="listitem">
 				<div class="scene-item__head">
 					<span class="scene-item__name">${escapeHtml(scene.name)}</span>
 					<button class="scene-item__menu" aria-label="Scene options for ${escapeHtml(scene.name)}" data-action="menu">${Icons.more()}</button>

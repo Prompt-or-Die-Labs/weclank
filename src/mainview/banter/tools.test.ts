@@ -123,4 +123,36 @@ describe("parseToolInvocation", () => {
 			}
 		});
 	});
+
+	describe("generate_broadcast_image", () => {
+		test("requires prompt", () => {
+			const bad = parseToolInvocation("generate_broadcast_image", {});
+			expect(bad.ok).toBe(false);
+		});
+
+		test("accepts optional size and title", () => {
+			const r = parseToolInvocation("generate_broadcast_image", {
+				prompt: "a friendly robot mascot",
+				size: "1024x1024",
+				title: "Mascot",
+			});
+			expect(r.ok).toBe(true);
+			if (r.ok && r.invocation.name === "generate_broadcast_image") {
+				expect(r.invocation.args.prompt).toBe("a friendly robot mascot");
+				expect(r.invocation.args.size).toBe("1024x1024");
+				expect(r.invocation.args.title).toBe("Mascot");
+			}
+		});
+
+		test("rejects invalid size", () => {
+			const r = parseToolInvocation("generate_broadcast_image", {
+				prompt: "x",
+				size: "16x16",
+			});
+			expect(r.ok).toBe(true);
+			if (r.ok && r.invocation.name === "generate_broadcast_image") {
+				expect(r.invocation.args.size).toBeUndefined();
+			}
+		});
+	});
 });

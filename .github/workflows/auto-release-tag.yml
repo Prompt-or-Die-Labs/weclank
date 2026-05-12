@@ -1,0 +1,62 @@
+name: Auto-tag release
+
+# Every push to `main` creates the next semver `v*` tag (unless skipped). That
+# tag push triggers `release.yml`, which builds artifacts and publishes a
+# GitHub Release.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Override semver bump (default = infer from commits since last tag)"
+        required: false
+        type: choice
+        default: auto
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-tag-main
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Compute version and push tag
+    runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'push' && github.event.head_commit != null &&
+      !contains(github.event.head_commit.message, '[skip release]')) ||
+      github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git tagger
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+
+      - name: Fetch tags from origin
+        run: git fetch --tags origin
+
+      - name: Optional bump override (manual run only)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.bump != 'auto' }}
+        run: echo "BUMP=${{ github.event.inputs.bump }}" >> "$GITHUB_ENV"
+
+      - name: Create and push release tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun scripts/auto-release-tag.ts

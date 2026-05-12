@@ -20,6 +20,12 @@ export interface ModalOptions {
 	title: string;
 	body: string | HTMLElement;
 	onClose?: () => void;
+	/**
+	 * Focus this element on open (selector scoped to the modal backdrop).
+	 * Use for dialogs where the primary control is not the close button (e.g. combobox filter, textarea).
+	 * If missing or not focusable, falls back to the first focusable control in tab order.
+	 */
+	initialFocusSelector?: string;
 }
 
 export class Modal {
@@ -63,11 +69,20 @@ export class Modal {
 		document.addEventListener("keydown", this.onKeyDown);
 		root.appendChild(this.el);
 
-		// Focus the first focusable element so keyboard users land inside.
-		setTimeout(() => {
-			const first = this.focusable()[0];
-			first?.focus();
-		}, 0);
+		// Focus a sensible first control — optional override for filter-first / form-first dialogs.
+		setTimeout(() => this.focusInitial(), 0);
+	}
+
+	private focusInitial(): void {
+		const sel = this.opts.initialFocusSelector?.trim();
+		if (sel) {
+			const el = this.el.querySelector<HTMLElement>(sel);
+			if (el && !el.hasAttribute("disabled") && !el.hidden && el.offsetParent !== null) {
+				el.focus();
+				return;
+			}
+		}
+		this.focusable()[0]?.focus();
 	}
 
 	private focusable(): HTMLElement[] {
@@ -256,6 +271,8 @@ export function toast(message: string, tone: "info" | "success" | "error" = "inf
 	const root = ensureRoot();
 	const el = document.createElement("div");
 	el.className = `toast toast--${tone}`;
+	el.setAttribute("role", "status");
+	el.setAttribute("aria-live", tone === "error" ? "assertive" : "polite");
 	el.textContent = message;
 	root.appendChild(el);
 	setTimeout(() => el.classList.add("toast--leaving"), 2400);

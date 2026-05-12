@@ -1,7 +1,7 @@
 // Shared domain types for the studio. Every component reads/writes these
 // through the StudioStore.
 
-import type { MusicTrackId, OverlayId, ParticipantId, SceneId } from "./ids";
+import type { MusicTrackId, OverlayId, ParticipantId, SceneId, ShowSegmentId } from "./ids";
 
 export type SourceKind =
 	| "camera" // human webcam
@@ -32,7 +32,7 @@ export interface VisualConfig {
 	animations?: { idle?: string; talking?: string };
 }
 
-export type TTSProviderId = "elevenlabs" | "openrouter" | "suno";
+export type TTSProviderId = "elevenlabs" | "openrouter" | "suno" | "openai";
 
 export interface TTSConfig {
 	provider: TTSProviderId;
@@ -54,6 +54,16 @@ export interface TTSConfig {
 	instrumental?: boolean;
 }
 
+export type AgentAutonomyLevel = "suggested" | "auto-safe" | "full";
+
+/** Which API hosts chat completions for an agent (tools + text). */
+export type BanterLlmProvider = "openrouter" | "openai";
+
+export interface AgentToolPermissions {
+	controlOverlays: boolean;
+	controlMusic: boolean;
+}
+
 export interface BanterConfig {
 	/** When true, the engine is wired up; toggle without losing the rest of
 	 * the config. */
@@ -61,8 +71,9 @@ export interface BanterConfig {
 	/** Anonymous read-only Twitch IRC. Empty string = no chat source (the
 	 * agent stays idle until something else drives it). */
 	twitchChannel: string;
-	/** OpenRouter model id for the response LLM. Defaults to a fast cheap
-	 * model. */
+	/** Where chat completions are sent. Defaults to OpenRouter for older saves. */
+	llmProvider?: BanterLlmProvider;
+	/** Model id — OpenRouter slugs (e.g. <code>openrouter/free</code>) or OpenAI Chat Completions ids (e.g. <code>gpt-5.3-codex</code>, <code>gpt-5.5</code>). */
 	llmModel: string;
 	/** Personality + behavior. Short, role-defining; the engine appends
 	 * recent chat history per turn. */
@@ -78,10 +89,14 @@ export interface BanterConfig {
 	 * Requires the mic transcription subsystem to find a non-agent audio
 	 * source (a mic participant or camera+mic combo). */
 	voiceContext?: boolean;
-	/** Model id for mic transcription (OpenRouter audio/transcriptions
-	 * endpoint). The mic transcriber is a studio-wide singleton, so the
-	 * most recently-started banter session's value wins. */
+	/** Mic STT backend. OpenRouter uses the stored OpenRouter key; OpenAI uses the platform `openai` key. */
+	transcriptionProvider?: "openrouter" | "openai";
+	/** Model id for mic transcription — OpenRouter slug or OpenAI transcription model, depending on `transcriptionProvider`. */
 	transcriptionModel?: string;
+	/** When true, attach a downscaled live program-preview JPEG to the latest user turn so vision-capable models can see the composited stream. */
+	visionProgramPreview?: boolean;
+	autonomyLevel?: AgentAutonomyLevel;
+	toolPermissions?: AgentToolPermissions;
 }
 
 export interface Participant {
@@ -135,6 +150,23 @@ export interface StreamConfig {
 	quality: StreamQuality;
 	recording: boolean;
 	live: boolean;
+}
+
+export type ShowSegmentStatus = "upcoming" | "live" | "done";
+
+export interface ShowSegment {
+	id: ShowSegmentId;
+	title: string;
+	durationSec: number;
+	notes?: string;
+	status: ShowSegmentStatus;
+	startedAt?: number;
+	completedAt?: number;
+}
+
+export interface RunOfShowState {
+	segments: ShowSegment[];
+	activeSegmentId: ShowSegmentId | null;
 }
 
 export type OverlayPosition = "bottom-left" | "bottom-right" | "top-left" | "top-right" | "center" | "lower-third";
@@ -191,6 +223,15 @@ export interface TranscriptConfig {
 	path: string;
 }
 
+/** Persisted UI / onboarding preferences — safe to merge on restore. */
+export type StudioFocusMode = "broadcast" | "full";
+
+export interface StudioPrefs {
+	/** When `broadcast`, the UI de-emphasizes AI-heavy paths until the user
+	 * is ready (focus on RTMP + camera first). */
+	focusMode?: StudioFocusMode;
+}
+
 export interface StudioState {
 	scenes: Scene[];
 	activeSceneId: SceneId;
@@ -199,10 +240,13 @@ export interface StudioState {
 	 * participant.id field, which is the safety net at API boundaries. */
 	participants: Record<string, Participant>;
 	stream: StreamConfig;
+	runOfShow: RunOfShowState;
 	overlays: StudioOverlays;
 	streamOverlays: StreamOverlay[];
 	music: { volume: number; current: MusicTrack | null };
 	transcript?: TranscriptConfig;
 	// id of the participant whose lower-third / settings the user is editing
 	focusedParticipantId: ParticipantId | null;
+	/** Optional — merged from persistence; defaults applied in the store. */
+	studioPrefs?: StudioPrefs;
 }

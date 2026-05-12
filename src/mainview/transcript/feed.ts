@@ -10,7 +10,7 @@ import { bunRpc } from "../rpc";
 import { studio } from "../state/studio-store";
 import { IpcError } from "../core/errors";
 
-interface TranscriptEvent {
+export interface TranscriptEvent {
 	seq: number;
 	ts: number;
 	kind: string;
@@ -81,6 +81,10 @@ class TranscriptFeed {
 			.filter((e) => e.seq > seq)
 			.slice(-limit)
 			.map((e) => `- ${tagFor(e.kind)} ${e.summary}`);
+	}
+
+	eventsSnapshot(limit = RING_SIZE): TranscriptEvent[] {
+		return this.events.slice(-limit);
 	}
 
 	/** Test hook — seed events without going through the RPC poll path.

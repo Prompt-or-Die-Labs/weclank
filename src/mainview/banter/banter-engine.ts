@@ -25,11 +25,13 @@ import { LLMClient, type ChatTurn } from "./llm-client";
 import { TwitchChatSource } from "./twitch-chat";
 import type { ChatSource, ChatMessage } from "./chat-source";
 import { runAgentToolLoop, type AgentToolCallRecord } from "./agent-turn";
+import { runtimeAutonomy, runtimeToolPermissions } from "./tool-policy";
 import { studio } from "../state/studio-store";
 import { transcriptFeed } from "../transcript/feed";
 import { micTranscriber } from "../transcription/mic-transcriber";
 import { ensureVoiceRoute } from "../tts/voice-route";
 import { userMessageFor } from "../core/errors";
+import { setAiDegradedMessage } from "../studio-health";
 import type { ParticipantId } from "../core/ids";
 import type { BanterConfig } from "../core/types";
 
@@ -63,6 +65,8 @@ const MIN_MESSAGE_LENGTH = 3;
 // utterance before we're allowed to chime in unprompted.
 const IDLE_CHECK_INTERVAL_MS = 12_000;
 const IDLE_QUIET_BEFORE_MS = 25_000;
+/** Min interval between vision JPEG attachments to the LLM (per session). */
+const VISION_PREVIEW_MIN_INTERVAL_MS = 15_000;
 
 class BanterSession {
 	private aborted = false;
@@ -79,6 +83,8 @@ class BanterSession {
 	/** High-water mark for transcript events this session has seen.
 	 * Anything ≤ this won't trigger a proactive comment again. */
 	private lastTranscriptSeq = 0;
+	/** Last time we attached a program-preview frame for vision models. */
+	private lastVisionPreviewAt = 0;
 	/** Observable phase. Transitions in respond() / runToolLoop() /
 	 * ensureProvider(). Read by the Agents tab via getPhase(). */
 	phase: BanterPhase = "idle";
@@ -104,7 +110,7 @@ class BanterSession {
 		private participantId: ParticipantId,
 		private config: BanterConfig,
 	) {
-		this.llm = new LLMClient(config.llmModel);
+		this.llm = new LLMClient(config.llmModel, { provider: config.llmProvider ?? "openrouter" });
 		// Default newer flags to true for configs persisted before they
 		// existed — keeps backward compat without yet another migration.
 		const patch: Partial<BanterConfig> = {};
@@ -124,7 +130,10 @@ class BanterSession {
 		// is saying. The transcriber stays running while at least one
 		// session subscribes, then tears down when the last one unsubs.
 		if (this.config.voiceContext) {
-			if (this.config.transcriptionModel) micTranscriber.setModel(this.config.transcriptionModel);
+			micTranscriber.setTranscription({
+				provider: this.config.transcriptionProvider ?? "openrouter",
+				model: this.config.transcriptionModel,
+			});
 			this.unsubscribeMic = micTranscriber.subscribe((text) => this.onHostUtterance(text));
 		}
 		if (!this.config.twitchChannel) {
@@ -191,6 +200,51 @@ class BanterSession {
 		return true;
 	}
 
+	private historyForLlmWithOptionalVision(): ChatTurn[] {
+		if (!this.config.visionProgramPreview) return this.history;
+		const now = Date.now();
+		if (now - this.lastVisionPreviewAt < VISION_PREVIEW_MIN_INTERVAL_MS) return this.history;
+
+		let canvas: HTMLCanvasElement;
+		try {
+			// Lazy-load: `studio-store` imports `banterEngine`; eager-importing
+			// `stream-engine` here would construct StreamEngine at module load
+			// (canvas 2D) and break Bun tests.
+			const { streamEngine } = require("../streaming/stream-engine") as typeof import("../streaming/stream-engine");
+			canvas = streamEngine.canvasEl;
+		} catch {
+			return this.history;
+		}
+		if (!canvas?.width) return this.history;
+
+		let dataUrl: string;
+		try {
+			dataUrl = canvas.toDataURL("image/jpeg", 0.5);
+		} catch {
+			return this.history;
+		}
+		if (!dataUrl.startsWith("data:image/jpeg")) return this.history;
+
+		const last = this.history[this.history.length - 1];
+		if (!last || last.role !== "user" || typeof last.content !== "string" || !last.content.trim()) {
+			return this.history;
+		}
+
+		this.lastVisionPreviewAt = now;
+		const text = last.content;
+		const augmented: ChatTurn = {
+			role: "user",
+			content: [
+				{
+					type: "text",
+					text: `${text}\n\n[Attached: live program preview — JPEG of the composited broadcast canvas.]`,
+				},
+				{ type: "image_url", image_url: { url: dataUrl, detail: "low" } },
+			],
+		};
+		return [...this.history.slice(0, -1), augmented];
+	}
+
 	private async respond(msg: ChatMessage): Promise<void> {
 		// Reserve the cooldown slot up front so concurrent triggers can't
 		// double-fire while the LLM is still thinking.
@@ -202,12 +256,13 @@ class BanterSession {
 		this.trimHistory();
 
 		try {
+			setAiDegradedMessage(null);
 			const transcriptContext = this.buildTranscriptContext();
 			const systemContent = transcriptContext
 				? `${this.config.systemPrompt}\n\n${transcriptContext}`
 				: this.config.systemPrompt;
 			this.phase = "thinking";
-			const reply = await this.runToolLoop(systemContent, this.history);
+			const reply = await this.runToolLoop(systemContent, this.historyForLlmWithOptionalVision());
 			if (this.aborted) { this.phase = "idle"; return; }
 			if (!reply) { this.phase = "idle"; return; }
 			if (this.config.voiceActivityGate && anyHumanSpeaking()) {
@@ -237,6 +292,7 @@ class BanterSession {
 			await provider.speak(reply);
 		} catch (err) {
 			console.warn("[banter] respond failed", err);
+			setAiDegradedMessage(userMessageFor(err));
 		} finally {
 			this.phase = "idle";
 		}
@@ -251,11 +307,18 @@ class BanterSession {
 	 * The session's AbortController threads through every LLM call —
 	 * `stop()` aborts mid-respond instead of letting tokens keep flying. */
 	private async runToolLoop(systemContent: string, history: ChatTurn[]): Promise<string> {
+		const participant = studio.state.participants[this.participantId];
 		return runAgentToolLoop({
 			llm: this.llm,
 			systemContent,
 			history,
 			signal: this.abortController.signal,
+			policy: {
+				participantId: this.participantId,
+				agentName: participant?.displayName ?? String(this.participantId),
+				autonomyLevel: runtimeAutonomy(this.config),
+				permissions: runtimeToolPermissions(this.config),
+			},
 			onTextReady: () => { this.phase = "generating"; },
 			onToolCall: (entry) => this.pushToolLog(entry),
 		});
@@ -306,6 +369,7 @@ class BanterSession {
 		].join("\n");
 
 		try {
+			setAiDegradedMessage(null);
 			this.phase = "thinking";
 			const reply = await this.runToolLoop(systemContent, this.history);
 			if (this.aborted || !reply) { this.phase = "idle"; return; }
@@ -320,6 +384,7 @@ class BanterSession {
 			await provider.speak(reply);
 		} catch (err) {
 			console.warn("[banter] proactive comment failed", err);
+			setAiDegradedMessage(userMessageFor(err));
 		} finally {
 			this.phase = "idle";
 		}
@@ -348,6 +413,25 @@ class BanterSession {
 class BanterEngine {
 	private sessions = new Map<string, BanterSession>();
 	private globalReplyListeners: Array<{ fn: (reply: AgentReply) => void; unsubs: Array<() => void> }> = [];
+	private sessionLifecycleListeners = new Set<() => void>();
+
+	/** Fires when a banter session starts or stops (participant rows may be unchanged). */
+	onSessionLifecycle(fn: () => void): () => void {
+		this.sessionLifecycleListeners.add(fn);
+		return () => {
+			this.sessionLifecycleListeners.delete(fn);
+		};
+	}
+
+	private emitSessionLifecycle(): void {
+		for (const fn of this.sessionLifecycleListeners) {
+			try {
+				fn();
+			} catch (err) {
+				console.warn("[banter] session lifecycle listener failed", err);
+			}
+		}
+	}
 
 	start(id: ParticipantId, config: BanterConfig): BanterStartResult {
 		this.stop(id);
@@ -363,17 +447,39 @@ class BanterEngine {
 		for (const entry of this.globalReplyListeners) {
 			entry.unsubs.push(session.addReplyListener(entry.fn));
 		}
+		this.syncHostMicTranscriptionPolicy();
 		void session.run();
+		this.emitSessionLifecycle();
 		return { ok: true };
 	}
 
 	stop(id: ParticipantId): void {
 		this.sessions.get(id)?.stop();
 		this.sessions.delete(id);
+		this.syncHostMicTranscriptionPolicy();
+		this.emitSessionLifecycle();
 	}
 
 	stopAll(): void {
 		for (const id of this.sessions.keys()) this.stop(id as ParticipantId);
+	}
+
+	/** Align shared mic STT (OpenRouter vs OpenAI + model) with a running agent
+	 * that has host mic context enabled — called when sessions start/stop so
+	 * capture uses the right backend before the first utterance. */
+	private syncHostMicTranscriptionPolicy(): void {
+		for (const sid of this.sessions.keys()) {
+			const id = sid as ParticipantId;
+			const p = studio.state.participants[id];
+			const cfg = p?.banter;
+			if (!cfg || cfg.enabled === false) continue;
+			if (cfg.voiceContext === false) continue;
+			micTranscriber.setTranscription({
+				provider: cfg.transcriptionProvider ?? "openrouter",
+				model: cfg.transcriptionModel,
+			});
+			return;
+		}
 	}
 
 	isRunning(id: ParticipantId): boolean {
@@ -441,6 +547,7 @@ Message authors:
 
 You have tools available to enhance the stream:
 - show_overlay: Drop a title card when the dev starts something new ("Building auth flow"), a notice for shoutouts/follows, a code-snippet to highlight something interesting, or a lower-third for guests. Use sparingly.
+- generate_broadcast_image: Create a still image with OpenAI DALL-E 3 and show it on the broadcast (uses API credits — only when it genuinely helps the moment).
 - play_music / stop_music / set_music_volume: Set the vibe. Default to instrumental music with low volume (0.25-0.35) so it doesn't fight your voice. Switch tracks at scene changes or when the energy shifts.
 - list_overlays / remove_overlay: Clean up your own clutter.
 
@@ -453,3 +560,9 @@ When you use a tool, ALWAYS also produce a short spoken line — your voice carr
 // Users wanting higher throughput or a specific model swap this for e.g.
 // `anthropic/claude-haiku-4-5`, `google/gemini-2.5-flash`, etc.
 export const DEFAULT_BANTER_MODEL = "openrouter/free";
+
+/** OpenAI Chat Completions default when `BanterConfig.llmProvider === "openai"`.
+ * Per OpenAI's model catalog, `gpt-5.3-codex` is the current agentic Codex class
+ * (Chat Completions + tools); older Codex snapshots such as `gpt-5.1-codex-max`
+ * are marked deprecated — see https://developers.openai.com/api/docs/models/gpt-5.3-codex */
+export const DEFAULT_OPENAI_BANTER_MODEL = "gpt-5.3-codex";

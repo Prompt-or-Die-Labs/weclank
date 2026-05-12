@@ -3,6 +3,7 @@ import { AgentsTab } from "./tabs/agents-tab";
 import { BantersTab } from "./tabs/banters-tab";
 import { MusicTab } from "./tabs/music-tab";
 import { NotesTab } from "./tabs/notes-tab";
+import { OutputsTab } from "./tabs/outputs-tab";
 import { StatsStrip } from "./stats-strip";
 import { Prompter } from "./prompter";
 import { escapeHtml } from "./primitives";
@@ -20,16 +21,17 @@ export function mountUtilityWindow(kind: UtilityWindowKind): void {
 	const app = document.getElementById("app");
 	if (!app) throw new Error("#app missing");
 	document.body.classList.add("utility-body", `utility-body--${kind}`);
+	app.className = "utility-app";
 	app.innerHTML = `
-		<div class="utility-window utility-window--${kind}" style="height: 100%; display: flex; flex-direction: column; background: #0a0c0a; color: white;">
-			<header class="utility-window__header" style="min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px; border-bottom: 1px solid rgba(255,255,255,0.1); background: #0d100d;">
+		<div class="utility-window utility-window--${kind}">
+			<header class="utility-window__header">
 				<div>
-					<div class="utility-window__eyebrow" style="font-family: monospace; font-size: 9px; letter-spacing: 0.10em; text-transform: uppercase; color: rgba(255,255,255,0.4);">Weclank</div>
-					<h1 style="font-size: 14px; font-weight: 600; letter-spacing: 0; color: white; margin: 0;">${escapeHtml(titleFor(kind))}</h1>
+					<div class="utility-window__eyebrow">Weclank</div>
+					<h1>${escapeHtml(titleFor(kind))}</h1>
 				</div>
-				<span class="utility-window__badge" style="font-family: monospace; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px 8px;">${escapeHtml(kind === "overlay" ? "click-through" : "utility")}</span>
+				<span class="utility-window__badge">${escapeHtml(kind === "overlay" ? "click-through" : "utility")}</span>
 			</header>
-			<div class="utility-window__body" data-utility-body style="flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px;"></div>
+			<div class="utility-window__body" data-utility-body></div>
 		</div>
 	`;
 	const body = app.querySelector<HTMLElement>("[data-utility-body]");
@@ -37,9 +39,9 @@ export function mountUtilityWindow(kind: UtilityWindowKind): void {
 
 	if (kind === "overlay") {
 		body.innerHTML = `
-			<div class="utility-window__overlay-card" style="display: inline-flex; flex-direction: column; gap: 4px; padding: 12px 16px; border: 1px solid rgba(255,255,255,0.16); border-radius: 8px; background: rgba(6,9,6,0.64); color: white;">
+			<div class="utility-window__overlay-card">
 				<strong>Weclank overlay</strong>
-				<span style="font-size: 11px; color: rgba(255,255,255,0.6);">Mouse events pass through transparent regions.</span>
+				<span>Transparent areas pass clicks through.</span>
 			</div>
 		`;
 		return;
@@ -56,8 +58,9 @@ export function mountUtilityWindow(kind: UtilityWindowKind): void {
 	}
 
 	if (kind === "producer") {
-		mountPanel(body, new AgentsTab());
 		mountPanel(body, new ChatTab());
+		mountPanel(body, new AgentsTab());
+		mountPanel(body, new OutputsTab());
 		return;
 	}
 
@@ -73,6 +76,7 @@ export function mountUtilityWindow(kind: UtilityWindowKind): void {
 	mountPanel(body, new BantersTab());
 	mountPanel(body, new MusicTab());
 	mountPanel(body, new NotesTab());
+	mountPanel(body, new OutputsTab());
 }
 
 function mountPanel(host: HTMLElement, component: Component<unknown>): void {

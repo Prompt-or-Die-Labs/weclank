@@ -86,6 +86,11 @@ export class SourcesList extends Component<State> {
 		`;
 	}
 
+	protected afterMount(): void {
+		this.el.setAttribute("role", "region");
+		this.el.setAttribute("aria-label", "Sources in the active scene");
+	}
+
 	protected bind(): void {
 		this.on(this.$('[data-action="add"]'), "click", (e) =>
 			this.openAddMenu(e.currentTarget as HTMLElement),

@@ -1,7 +1,13 @@
 import {
+	ApplicationMenu,
 	BrowserWindow,
 	BrowserView,
+	ContextMenu,
+	Tray,
 	Utils,
+	app,
+	type ApplicationMenuItemConfig,
+	type MenuItemConfig,
 	type RPCSchema,
 } from "electrobun/bun";
 
@@ -128,6 +134,36 @@ interface TranscriptWatcherState {
 }
 
 type StudioUtilityWindowKind = "studio" | "chat" | "producer" | "stats" | "overlay" | "prompter";
+type NativeMenuAction =
+	| "main.show"
+	| "main.hide"
+	| "main.reload"
+	| "main.devtools"
+	| "settings.open"
+	| "help.open"
+	| "rtmp.open"
+	| "recording.toggle"
+	| "stream.toggle"
+	| "window.studio"
+	| "window.chat"
+	| "window.producer"
+	| "window.stats"
+	| "window.overlay"
+	| "window.prompter"
+	| "window.closeUtilities"
+	| "app.quit";
+
+interface SecretValueRow {
+	value: string;
+}
+
+interface OpenRouterScriptResponse {
+	choices?: Array<{
+		message?: {
+			content?: string;
+		};
+	}>;
+}
 
 let transcriptWatcher: TranscriptWatcherState | null = null;
 let transcriptEvents: TranscriptEvent[] = [];
@@ -394,6 +430,11 @@ export type PhotoBoothRPC = {
 				params: Record<string, never>;
 				response: { name: string; label: string };
 			};
+			/** Whether `ffmpeg` is on PATH (required for RTMP egress). */
+			getFfmpegProbe: {
+				params: Record<string, never>;
+				response: { ok: boolean; versionLine?: string; error?: string };
+			};
 			/** Scan well-known coding-agent session dirs (Claude Code,
 			 * Codex, Cline, etc.) for the most recently modified JSONL
 			 * file. Accepts extraRoots so a user can point at a custom
@@ -487,6 +528,10 @@ export type PhotoBoothRPC = {
 					updatedAt?: number;
 				};
 			};
+			getStudioWindowMode: {
+				params: Record<string, never>;
+				response: { alwaysOnTop: boolean; visibleOnAllWorkspaces: boolean };
+			};
 			setStudioWindowMode: {
 				params: { alwaysOnTop?: boolean; visibleOnAllWorkspaces?: boolean };
 				response: { ok: boolean; alwaysOnTop?: boolean; visibleOnAllWorkspaces?: boolean; error?: string };
@@ -494,6 +539,14 @@ export type PhotoBoothRPC = {
 			openStudioUtilityWindow: {
 				params: { kind: StudioUtilityWindowKind; clickThrough?: boolean; alwaysOnTop?: boolean };
 				response: { ok: boolean; id?: number; error?: string };
+			};
+			closeStudioUtilityWindows: {
+				params: Record<string, never>;
+				response: { ok: boolean; error?: string };
+			};
+			showNativeContextMenu: {
+				params: { editable: boolean; hasSelection: boolean };
+				response: { ok: boolean; error?: string };
 			};
 			listWorkspaceApps: {
 				params: Record<string, never>;
@@ -541,6 +594,11 @@ export type PhotoBoothRPC = {
 			utilityWindowClosed: { id: number; kind: StudioUtilityWindowKind };
 			// Initialize utility window with its kind so it knows what to render
 			initializeUtilityWindow: { id: number; kind: StudioUtilityWindowKind };
+			nativeOpenSettings: Record<string, never>;
+			nativeOpenHelp: Record<string, never>;
+			nativeOpenRtmp: Record<string, never>;
+			nativeToggleRecording: Record<string, never>;
+			nativeToggleLive: Record<string, never>;
 		};
 	}>;
 };
@@ -799,6 +857,19 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 				return { name: enc.name, label: enc.label };
 			},
 
+			getFfmpegProbe: async () => {
+				try {
+					const proc = Bun.spawn(["ffmpeg", "-version"], { stdout: "pipe", stderr: "pipe" });
+					const text = await new Response(proc.stdout).text();
+					const code = await proc.exited;
+					if (code !== 0) return { ok: false, error: "ffmpeg returned a non-zero exit code" };
+					const versionLine = text.split("\n")[0]?.trim() || "ffmpeg";
+					return { ok: true, versionLine };
+				} catch (err) {
+					return { ok: false, error: (err as Error).message };
+				}
+			},
+
 			findActiveTranscriptSession: async ({ extraRoots }) => {
 				try {
 					const home = Bun.env["HOME"] ?? "";
@@ -864,6 +935,10 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 
 			getDatabasePath: async () => ({ path: getDbPath() }),
 			getStreamStats: async () => ({ ...egressStats }),
+			getStudioWindowMode: async () => ({
+				alwaysOnTop: mainWindow.isAlwaysOnTop(),
+				visibleOnAllWorkspaces: mainWindow.isVisibleOnAllWorkspaces(),
+			}),
 
 			setStudioWindowMode: async ({ alwaysOnTop, visibleOnAllWorkspaces }) => {
 				try {
@@ -881,11 +956,29 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 
 			openStudioUtilityWindow: async ({ kind, clickThrough, alwaysOnTop }) => {
 				try {
-					const win = createUtilityWindow(kind, {
+					const win = openUtilityWindow(kind, {
 						clickThrough: clickThrough ?? kind === "overlay",
-						alwaysOnTop: alwaysOnTop ?? kind === "overlay",
+						alwaysOnTop: alwaysOnTop ?? (kind === "overlay" || kind === "prompter"),
 					});
 					return { ok: true, id: win.id };
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			closeStudioUtilityWindows: async () => {
+				try {
+					closeUtilityWindows();
+					return { ok: true };
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			showNativeContextMenu: async ({ editable, hasSelection }) => {
+				try {
+					ContextMenu.showContextMenu(buildContextMenu(editable, hasSelection));
+					return { ok: true };
 				} catch (error) {
 					return { ok: false, error: (error as Error).message };
 				}
@@ -976,15 +1069,13 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 
 			generateScript: async ({ userId, topic }) => {
 				try {
-					// Load OpenRouter API key from secrets
 					const db = await openDb();
 					const secretStmt = db.prepare("SELECT value FROM user_secrets WHERE user_id = ? AND key_name = ?");
-					const secretRow = secretStmt.get(userId, "openrouter_api_key") as any;
+					const secretRow = secretStmt.get(userId, "openrouter") as SecretValueRow | null;
 					if (!secretRow) return { ok: false, error: "OpenRouter API key not configured" };
 
 					const apiKey = secretRow.value;
 
-					// Call Claude via OpenRouter
 					const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
 						method: "POST",
 						headers: {
@@ -1007,11 +1098,10 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 						return { ok: false, error: `OpenRouter API error: ${response.status}` };
 					}
 
-					const data = (await response.json()) as any;
+					const data = (await response.json()) as OpenRouterScriptResponse;
 					const content = data.choices?.[0]?.message?.content;
-					if (!content) return { ok: false, error: "No content generated" };
+					if (!content?.trim()) return { ok: false, error: "No content generated" };
 
-					// Save as generated script
 					const title = `Generated: ${topic}`;
 					await saveGeneratedScript(userId, title, content, topic);
 
@@ -1173,18 +1263,36 @@ process.on("uncaughtException", (err) => {
 	console.error("[bun] uncaught exception:", err);
 });
 
-const utilityWindows = new Map<number, { window: BrowserWindow; kind: StudioUtilityWindowKind }>();
+type StudioWindow = BrowserWindow<typeof photoBoothRPC>;
+
+let mainWindow: StudioWindow;
+let tray: Tray | null = null;
+
+const utilityWindows = new Map<StudioUtilityWindowKind, StudioWindow>();
+
+function openUtilityWindow(
+	kind: StudioUtilityWindowKind,
+	options: { clickThrough: boolean; alwaysOnTop: boolean },
+): StudioWindow {
+	const existing = utilityWindows.get(kind);
+	if (existing) {
+		if (options.alwaysOnTop) existing.setAlwaysOnTop(true);
+		if (kind === "overlay") existing.setVisibleOnAllWorkspaces(true);
+		options.clickThrough ? existing.showInactive() : existing.show();
+		if (!options.clickThrough) existing.activate();
+		return existing;
+	}
+	return createUtilityWindow(kind, options);
+}
 
 function createUtilityWindow(
 	kind: StudioUtilityWindowKind,
 	options: { clickThrough: boolean; alwaysOnTop: boolean },
-): BrowserWindow {
+): StudioWindow {
 	const overlay = kind === "overlay";
 	const frame = utilityFrame(kind);
-	const url = kind === "prompter"
-		? "views://prompter/index.html"
-		: "views://mainview/index.html";
-	const win = new BrowserWindow({
+	const url = "views://mainview/index.html";
+	const win = new BrowserWindow<typeof photoBoothRPC>({
 		title: `Weclank ${utilityTitle(kind)}`,
 		url,
 		frame,
@@ -1199,25 +1307,26 @@ function createUtilityWindow(
 	});
 	if (options.alwaysOnTop) win.setAlwaysOnTop(true);
 	if (overlay) win.setVisibleOnAllWorkspaces(true);
-	
-	// Track window with kind for lifecycle management
-	utilityWindows.set(win.id, { window: win, kind });
+	utilityWindows.set(kind, win);
 
-	// Notify main window when utility window is ready (DOM ready)
 	win.webview.on("dom-ready", () => {
-		// Tell the utility window what kind it is so it can render appropriately
-		(win.webview.rpc as any)?.send?.initializeUtilityWindow({ id: win.id, kind });
-		// Notify main window it's ready
-		(mainWindow.webview.rpc as any)?.send?.utilityWindowReady({ id: win.id, kind });
+		win.webview.rpc?.send.initializeUtilityWindow({ id: win.id, kind });
+		mainWindow.webview.rpc?.send.utilityWindowReady({ id: win.id, kind });
 	});
 
-	// Clean up when utility window closes
 	win.on("close", () => {
-		utilityWindows.delete(win.id);
-		(mainWindow.webview.rpc as any)?.send?.utilityWindowClosed({ id: win.id, kind });
+		utilityWindows.delete(kind);
+		mainWindow.webview.rpc?.send.utilityWindowClosed({ id: win.id, kind });
 	});
 
 	return win;
+}
+
+function closeUtilityWindows(): void {
+	for (const win of [...utilityWindows.values()]) {
+		win.close();
+	}
+	utilityWindows.clear();
 }
 
 function utilityTitle(kind: StudioUtilityWindowKind): string {
@@ -1233,20 +1342,268 @@ function utilityTitle(kind: StudioUtilityWindowKind): string {
 
 function utilityFrame(kind: StudioUtilityWindowKind): { width: number; height: number; x: number; y: number } {
 	switch (kind) {
-		case "studio": return { width: 1180, height: 780, x: 100, y: 80 };
-		case "chat": return { width: 420, height: 640, x: 120, y: 120 };
-		case "producer": return { width: 760, height: 620, x: 160, y: 120 };
-		case "stats": return { width: 520, height: 260, x: 180, y: 160 };
-		case "overlay": return { width: 520, height: 240, x: 220, y: 180 };
-		case "prompter": return { width: 600, height: 800, x: 1400, y: 100 };
+		case "studio": return { width: 1180, height: 780, x: 90, y: 80 };
+		case "chat": return { width: 460, height: 720, x: 120, y: 110 };
+		case "producer": return { width: 1120, height: 760, x: 120, y: 90 };
+		case "stats": return { width: 680, height: 190, x: 160, y: 140 };
+		case "overlay": return { width: 560, height: 280, x: 200, y: 160 };
+		case "prompter": return { width: 680, height: 760, x: 700, y: 80 };
 	}
 }
 
-const mainWindow: BrowserWindow = new BrowserWindow({
+function installNativeShell(): void {
+	ApplicationMenu.setApplicationMenu(buildApplicationMenu());
+	ApplicationMenu.on("application-menu-clicked", (event) => {
+		const action = nativeMenuActionFromEvent(event as { data?: { action?: string } });
+		if (action) handleNativeMenuAction(action);
+	});
+	ContextMenu.on("context-menu-clicked", (event) => {
+		const action = nativeMenuActionFromEvent(event as { data?: { action?: string } });
+		if (action) handleNativeMenuAction(action);
+	});
+	tray = new Tray({ title: "Weclank" });
+	tray.setMenu(buildTrayMenu());
+	tray.on("tray-clicked", (event) => {
+		const action = nativeMenuActionFromEvent(event as { data?: { action?: string } });
+		if (action) handleNativeMenuAction(action);
+	});
+}
+
+function buildApplicationMenu(): ApplicationMenuItemConfig[] {
+	const menu: ApplicationMenuItemConfig[] = [];
+	if (process.platform === "darwin") {
+		menu.push({
+			label: "Weclank",
+			submenu: [
+				{ role: "about" },
+				{ type: "separator" },
+				{ label: "Settings...", accelerator: "CmdOrCtrl+,", action: "settings.open" },
+				{ type: "separator" },
+				{ role: "hide" },
+				{ role: "hideOthers" },
+				{ role: "showAll" },
+				{ type: "separator" },
+				{ role: "quit" },
+			],
+		});
+	}
+	menu.push(
+		{
+			label: "File",
+			submenu: [
+				{ label: "Settings...", accelerator: "CmdOrCtrl+,", action: "settings.open" },
+				{ label: "Stream Destinations...", accelerator: "CmdOrCtrl+Shift+D", action: "rtmp.open" },
+				{ type: "separator" },
+				{ label: "Open Teleprompter", accelerator: "CmdOrCtrl+Shift+P", action: "window.prompter" },
+				...(process.platform === "darwin" ? [] : [{ type: "separator" }, { label: "Quit", action: "app.quit" }] as ApplicationMenuItemConfig[]),
+			],
+		},
+		{
+			label: "Edit",
+			submenu: [
+				{ role: "undo" },
+				{ role: "redo" },
+				{ type: "separator" },
+				{ role: "cut" },
+				{ role: "copy" },
+				{ role: "paste" },
+				{ role: "pasteAndMatchStyle" },
+				{ role: "delete" },
+				{ type: "separator" },
+				{ role: "selectAll" },
+			],
+		},
+		{
+			label: "View",
+			submenu: [
+				{ label: "Reload Studio", accelerator: "CmdOrCtrl+R", action: "main.reload" },
+				{ label: "Toggle DevTools", accelerator: "CmdOrCtrl+Shift+I", action: "main.devtools" },
+				{ type: "separator" },
+				{ label: "Go Live / Stop", accelerator: "CmdOrCtrl+Shift+L", action: "stream.toggle" },
+				{ label: "Start / Stop Recording", accelerator: "CmdOrCtrl+Shift+R", action: "recording.toggle" },
+				{ type: "separator" },
+				{ role: "toggleFullScreen" },
+			],
+		},
+		{
+			label: "Window",
+			submenu: [
+				{ role: "minimize" },
+				{ role: "close" },
+				{ type: "separator" },
+				{ label: "Studio Dock", accelerator: "CmdOrCtrl+Shift+U", action: "window.studio" },
+				{ label: "Chat Window", action: "window.chat" },
+				{ label: "Producer Window", action: "window.producer" },
+				{ label: "Stream Monitor", action: "window.stats" },
+				{ label: "Click-Through Overlay", action: "window.overlay" },
+				{ label: "Teleprompter", action: "window.prompter" },
+				{ type: "separator" },
+				{ label: "Close Utility Windows", action: "window.closeUtilities" },
+				{ type: "separator" },
+				{ role: "bringAllToFront" },
+			],
+		},
+		{
+			label: "Help",
+			submenu: [
+				{ label: "Weclank Help", accelerator: "CmdOrCtrl+/", action: "help.open" },
+			],
+		},
+	);
+	return menu;
+}
+
+function buildTrayMenu(): MenuItemConfig[] {
+	return [
+		{ type: "normal", label: "Show Weclank", action: "main.show" },
+		{ type: "normal", label: "Hide Weclank", action: "main.hide" },
+		{ type: "separator" },
+		{ type: "normal", label: "Studio Dock", action: "window.studio" },
+		{ type: "normal", label: "Chat Window", action: "window.chat" },
+		{ type: "normal", label: "Producer Window", action: "window.producer" },
+		{ type: "normal", label: "Stream Monitor", action: "window.stats" },
+		{ type: "normal", label: "Click-Through Overlay", action: "window.overlay" },
+		{ type: "normal", label: "Teleprompter", action: "window.prompter" },
+		{ type: "separator" },
+		{ type: "normal", label: "Close Utility Windows", action: "window.closeUtilities" },
+		{ type: "separator" },
+		{ type: "normal", label: "Quit", action: "app.quit" },
+	];
+}
+
+function buildContextMenu(editable: boolean, hasSelection: boolean): ApplicationMenuItemConfig[] {
+	const items: ApplicationMenuItemConfig[] = [];
+	if (editable) {
+		items.push(
+			{ role: "undo" },
+			{ role: "redo" },
+			{ type: "separator" },
+			{ role: "cut" },
+			{ role: "copy" },
+			{ role: "paste" },
+			{ role: "pasteAndMatchStyle" },
+			{ role: "delete" },
+			{ type: "separator" },
+			{ role: "selectAll" },
+		);
+	} else if (hasSelection) {
+		items.push({ role: "copy" });
+	}
+	if (items.length > 0) items.push({ type: "separator" });
+	items.push(
+		{ label: "Settings...", action: "settings.open" },
+		{ label: "Help", action: "help.open" },
+	);
+	return items;
+}
+
+function nativeMenuActionFromEvent(event: { data?: { action?: string } }): NativeMenuAction | null {
+	const action = event.data?.action;
+	return action && isNativeMenuAction(action) ? action : null;
+}
+
+function isNativeMenuAction(action: string): action is NativeMenuAction {
+	switch (action) {
+		case "main.show":
+		case "main.hide":
+		case "main.reload":
+		case "main.devtools":
+		case "settings.open":
+		case "help.open":
+		case "rtmp.open":
+		case "recording.toggle":
+		case "stream.toggle":
+		case "window.studio":
+		case "window.chat":
+		case "window.producer":
+		case "window.stats":
+		case "window.overlay":
+		case "window.prompter":
+		case "window.closeUtilities":
+		case "app.quit":
+			return true;
+	}
+	return false;
+}
+
+function handleNativeMenuAction(action: NativeMenuAction): void {
+	switch (action) {
+		case "main.show":
+			mainWindow.show();
+			mainWindow.activate();
+			break;
+		case "main.hide":
+			mainWindow.hide();
+			break;
+		case "main.reload":
+			mainWindow.webview.loadURL("views://mainview/index.html");
+			break;
+		case "main.devtools":
+			mainWindow.webview.toggleDevTools();
+			break;
+		case "settings.open":
+			mainWindow.show();
+			mainWindow.activate();
+			mainWindow.webview.rpc?.send.nativeOpenSettings({});
+			break;
+		case "help.open":
+			mainWindow.show();
+			mainWindow.activate();
+			mainWindow.webview.rpc?.send.nativeOpenHelp({});
+			break;
+		case "rtmp.open":
+			mainWindow.show();
+			mainWindow.activate();
+			mainWindow.webview.rpc?.send.nativeOpenRtmp({});
+			break;
+		case "recording.toggle":
+			mainWindow.webview.rpc?.send.nativeToggleRecording({});
+			break;
+		case "stream.toggle":
+			mainWindow.webview.rpc?.send.nativeToggleLive({});
+			break;
+		case "window.studio":
+			openUtilityWindow("studio", { clickThrough: false, alwaysOnTop: false });
+			break;
+		case "window.chat":
+			openUtilityWindow("chat", { clickThrough: false, alwaysOnTop: false });
+			break;
+		case "window.producer":
+			openUtilityWindow("producer", { clickThrough: false, alwaysOnTop: false });
+			break;
+		case "window.stats":
+			openUtilityWindow("stats", { clickThrough: false, alwaysOnTop: false });
+			break;
+		case "window.overlay":
+			openUtilityWindow("overlay", { clickThrough: true, alwaysOnTop: true });
+			break;
+		case "window.prompter":
+			openUtilityWindow("prompter", { clickThrough: false, alwaysOnTop: true });
+			break;
+		case "window.closeUtilities":
+			closeUtilityWindows();
+			break;
+		case "app.quit":
+			closeUtilityWindows();
+			tray?.remove();
+			app.quit();
+			break;
+	}
+}
+
+mainWindow = new BrowserWindow<typeof photoBoothRPC>({
 	title: "Weclank",
 	url: "views://mainview/index.html",
 	frame: { width: 1440, height: 900, x: 60, y: 60 },
 	rpc: photoBoothRPC,
 });
+
+mainWindow.on("close", () => {
+	closeUtilityWindows();
+	tray?.remove();
+	tray = null;
+});
+
+installNativeShell();
 
 console.log("Weclank started", mainWindow.id);

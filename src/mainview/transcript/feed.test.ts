@@ -58,6 +58,18 @@ describe("transcriptFeed", () => {
 		expect(transcriptFeed.summariesSince(99)).toEqual([]);
 	});
 
+	test("eventsSnapshot returns recent typed events without formatting", () => {
+		transcriptFeed.__seedForTesting([
+			ev(1, "assistant_text", "old"),
+			ev(2, "assistant_tool", "Bash bun test"),
+			ev(3, "assistant_text", "new"),
+		]);
+		expect(transcriptFeed.eventsSnapshot(2).map((event) => event.summary)).toEqual([
+			"Bash bun test",
+			"new",
+		]);
+	});
+
 	test("unknown kinds get the [event] tag", () => {
 		transcriptFeed.__seedForTesting([ev(1, "weird_kind", "x")]);
 		expect(transcriptFeed.recentSummaries()).toEqual(["- [event] x"]);

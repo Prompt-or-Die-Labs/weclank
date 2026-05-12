@@ -7,6 +7,7 @@ import type { TTSProvider } from "./provider";
 import { ElevenLabsTTSProvider } from "./elevenlabs-tts";
 import { OpenRouterTTSProvider } from "./openrouter-tts";
 import { SunoTTSProvider } from "./suno-tts";
+import { OpenAiSpeechTTSProvider } from "./openai-speech-tts";
 import type { TTSConfig, TTSProviderId } from "../core/types";
 import { getSecret, setSecretAndPersist } from "../auth/secrets-cache";
 
@@ -60,6 +61,12 @@ function build(config: TTSConfig): TTSProvider {
 				model: config.modelId,
 				style: config.style,
 				instrumental: config.instrumental,
+			});
+		case "openai":
+			return new OpenAiSpeechTTSProvider({
+				apiKey,
+				model: config.modelId,
+				voice: config.voiceId,
 			});
 	}
 }

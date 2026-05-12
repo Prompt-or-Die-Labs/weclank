@@ -50,6 +50,19 @@ const SCHEMAS: Record<TTSProviderId, ProviderSchema> = {
 		modelHint: "Any audio-output model id from openrouter.ai/models?output_modalities=audio.",
 		extras: ["format"],
 	},
+	openai: {
+		id: "openai",
+		label: "OpenAI (Speech)",
+		description: "Native Text-to-Speech — same platform API key as Settings (Chat, STT, Images).",
+		keyLabel: "OpenAI API key",
+		keyHint: "Optional if you already saved a key under Settings → AI Chat & Agents.",
+		voiceLabel: "Voice",
+		voicePlaceholder: "alloy",
+		voiceHint: "Voices: alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse — see platform.openai.com/docs/guides/text-to-speech.",
+		modelLabel: "Model",
+		modelPlaceholder: "tts-1",
+		modelHint: "tts-1 (fast) or gpt-4o-mini-tts for newer models.",
+	},
 	suno: {
 		id: "suno",
 		label: "Suno (music)",
@@ -198,7 +211,8 @@ export function pickTTSConfig(initial?: TTSConfig): Promise<TTSConfig | null> {
 
 		$<HTMLButtonElement>("[data-action=save]")!.addEventListener("click", async () => {
 			const provider = providerSel.value as TTSProviderId;
-			const apiKey = apiKeyInput.value.trim();
+			let apiKey = apiKeyInput.value.trim();
+			if (!apiKey) apiKey = getStoredApiKey(provider);
 			if (!apiKey) {
 				apiKeyInput.focus();
 				apiKeyInput.style.borderColor = "var(--danger)";

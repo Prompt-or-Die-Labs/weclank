@@ -6,14 +6,17 @@
 // strip them and rely on the Edit → "Replace model" action to re-attach.
 
 import { participantId, sceneId } from "../core/ids";
+import { createDefaultRunOfShow } from "../producer/run-of-show";
 import type {
 	Participant,
+	RunOfShowState,
 	Scene,
 	SourcePlacement,
+	StudioOverlays,
+	StudioPrefs,
+	StudioState,
 	StreamConfig,
 	StreamOverlay,
-	StudioOverlays,
-	StudioState,
 	TranscriptConfig,
 } from "../core/types";
 
@@ -38,7 +41,7 @@ interface PersistedParticipant {
 // MIGRATIONS below that transforms version N → N+1. The chain runs on
 // every load, so a user who's been away through several releases lands
 // at the current shape without losing data.
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 3;
 
 interface PersistedState {
 	version: typeof CURRENT_VERSION;
@@ -46,6 +49,7 @@ interface PersistedState {
 	activeSceneId: string;
 	participants: Record<string, PersistedParticipant>;
 	stream: Pick<StreamConfig, "title" | "quality">;
+	runOfShow?: RunOfShowState;
 	overlays?: StudioOverlays;
 	transcript?: TranscriptConfig;
 	/** Persistent stream overlays survive reload — useful when a title
@@ -53,12 +57,15 @@ interface PersistedState {
 	 * expiresAt set) are filtered out at save time. */
 	streamOverlays?: StreamOverlay[];
 	musicVolume?: number;
+	/** v3+: onboarding / UI focus preferences. */
+	studioPrefs?: StudioPrefs;
 }
 
 /** Migrators from version N → N+1. Index 0 = v1 → v2, index 1 = v2 → v3,
  * etc. Each must set the new `version` and add/transform fields. */
 const MIGRATIONS: Array<(input: Record<string, unknown>) => Record<string, unknown>> = [
 	migrateV1ToV2,
+	migrateV2ToV3,
 ];
 
 /** v1 → v2: scenes carried `{ layoutId, slots: (ParticipantId|null)[] }`.
@@ -83,6 +90,15 @@ function migrateV1ToV2(v1: Record<string, unknown>): Record<string, unknown> {
 	const { viewports: _v, ...rest } = v1;
 	void _v;
 	return { ...rest, version: 2, scenes: nextScenes };
+}
+
+function migrateV2ToV3(v2: Record<string, unknown>): Record<string, unknown> {
+	const prefs = v2["studioPrefs"];
+	return {
+		...v2,
+		version: 3,
+		studioPrefs: prefs && typeof prefs === "object" ? prefs : {},
+	};
 }
 
 /** Map the old layoutId + slot list to the new SourcePlacement[]. Rects
@@ -176,12 +192,14 @@ export function serializeState(state: StudioState): PersistedState {
 		activeSceneId: state.activeSceneId,
 		participants,
 		stream: { title: state.stream.title, quality: state.stream.quality },
+		runOfShow: state.runOfShow,
 		overlays: state.overlays,
 		transcript: state.transcript,
 		// Drop transient overlays (anything with an expiry). They were
 		// always meant to be ephemeral and would clutter the restore.
 		streamOverlays: state.streamOverlays.filter((o) => !o.expiresAt),
 		musicVolume: state.music.volume,
+		studioPrefs: state.studioPrefs ?? {},
 	};
 }
 
@@ -208,10 +226,12 @@ export function deserializeState(rawOrData: PersistedState | unknown): Partial<S
 			recording: false,
 			live: false,
 		},
+		runOfShow: data.runOfShow ?? createDefaultRunOfShow(),
 		overlays: data.overlays ?? {},
 		transcript: data.transcript,
 		streamOverlays: data.streamOverlays ?? [],
 		music: { volume: data.musicVolume ?? 0.4, current: null },
+		studioPrefs: data.studioPrefs ?? {},
 	};
 }
 

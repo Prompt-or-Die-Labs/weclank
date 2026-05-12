@@ -16,6 +16,7 @@ export type SceneId = Brand<string, "SceneId">;
 export type OverlayId = Brand<string, "OverlayId">;
 export type MusicTrackId = Brand<string, "MusicTrackId">;
 export type ToolCallId = Brand<string, "ToolCallId">;
+export type ShowSegmentId = Brand<string, "ShowSegmentId">;
 
 export const userId = (s: string): UserId => s as UserId;
 export const participantId = (s: string): ParticipantId => s as ParticipantId;
@@ -23,6 +24,7 @@ export const sceneId = (s: string): SceneId => s as SceneId;
 export const overlayId = (s: string): OverlayId => s as OverlayId;
 export const musicTrackId = (s: string): MusicTrackId => s as MusicTrackId;
 export const toolCallId = (s: string): ToolCallId => s as ToolCallId;
+export const showSegmentId = (s: string): ShowSegmentId => s as ShowSegmentId;
 
 /** Generic helper for places that mint an id with a kind prefix. */
 export function mintId<B extends string>(
