@@ -3923,6 +3923,76 @@ input, textarea, select { font: inherit; }
 	gap: var(--space-2);
 }
 
+/* ---------- Recording review (post-REC modal) ---------- */
+.recording-review {
+	font-size: 13px;
+	line-height: 1.45;
+	color: var(--text-1);
+	max-width: 560px;
+}
+.recording-review__path {
+	margin: 0 0 var(--space-2);
+	font-size: 11px;
+	word-break: break-all;
+	color: var(--text-2);
+}
+.recording-review__path code {
+	font-size: 10px;
+}
+.recording-review__video-wrap {
+	margin-bottom: var(--space-2);
+	border-radius: var(--radius-sm);
+	overflow: hidden;
+	border: 1px solid var(--border);
+	background: #000;
+}
+.recording-review__video {
+	display: block;
+	width: 100%;
+	max-height: 280px;
+	vertical-align: middle;
+}
+.recording-review__scrub {
+	margin-bottom: var(--space-2);
+}
+.recording-review__label {
+	display: block;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text-2);
+	margin-bottom: 4px;
+}
+.recording-review__scrub input[type="range"] {
+	width: 100%;
+}
+.recording-review__trim {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	margin-bottom: var(--space-2);
+}
+.recording-review__trim-row {
+	display: grid;
+	grid-template-columns: 80px 1fr auto;
+	align-items: center;
+	gap: var(--space-2);
+}
+.recording-review__trim-row input[type="number"] {
+	font-family: var(--font-mono);
+	font-size: 12px;
+}
+.recording-review__hint {
+	font-size: 12px;
+	color: var(--text-2);
+	margin: 0 0 var(--space-2);
+}
+.recording-review__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+
 /* ---------- Component error boundary fallback ---------- */
 .component-error {
 	padding: var(--space-3);

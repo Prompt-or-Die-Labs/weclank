@@ -17,6 +17,10 @@ import { startBroadcastCapture, type BroadcastCaptureSession } from "./capture";
 
 class LocalRecorder {
 	private capture: BroadcastCaptureSession | null = null;
+	/** True while the save dialog or Bun file open is in flight — prevents a
+	 * second start from hitting "recording already in progress" on the main
+	 * process before `this.capture` is assigned. */
+	private starting = false;
 	private startedAt = 0;
 	/** Serializes chunk writes so the last `dataavailable` blob finishes
 	 * before `finishRecordingFile` closes the handle (MediaRecorder does
@@ -35,32 +39,50 @@ class LocalRecorder {
 		if (this.capture) {
 			throw new AudioError("Recording already running", "Stop the current recording first.");
 		}
-
-		const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-		const result = await bunRpc.startRecordingFile({ suggestedName: `weclank-${ts}.mp4` });
-		if (!result.success) {
-			if (result.reason === "canceled") return;
-			throw new IpcError(
-				result.error ?? "unknown",
-				`Couldn't start recording: ${result.error ?? "no detail"}`,
+		if (this.starting) {
+			throw new AudioError(
+				"Recording start already in progress",
+				"Wait for the save dialog to finish, or try again in a moment.",
 			);
 		}
 
-		this.writeChain = Promise.resolve();
-		this.startedAt = Date.now();
-		this.capture = startBroadcastCapture({
-			source: streamEngine,
-			quality: studio.state.stream.quality,
-			chunkIntervalMs: 5_000,
-			onChunk: (blob) => {
-				this.writeChain = this.writeChain.then(() => this.shipChunk(blob));
-			},
-			onError: (event) => {
-				console.error("[recorder] error", event);
-				toast("Recording error — see console", "error");
-			},
-		});
-		studio.setStream({ recording: true });
+		this.starting = true;
+		let diskSessionOpen = false;
+		try {
+			const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+			const result = await bunRpc.startRecordingFile({ suggestedName: `weclank-${ts}.mp4` });
+			if (!result.success) {
+				if (result.reason === "canceled") return;
+				throw new IpcError(
+					result.error ?? "unknown",
+					`Couldn't start recording: ${result.error ?? "no detail"}`,
+				);
+			}
+			diskSessionOpen = true;
+
+			this.writeChain = Promise.resolve();
+			this.startedAt = Date.now();
+			this.capture = startBroadcastCapture({
+				source: streamEngine,
+				quality: studio.state.stream.quality,
+				chunkIntervalMs: 5_000,
+				onChunk: (blob) => {
+					this.writeChain = this.writeChain.then(() => this.shipChunk(blob));
+				},
+				onError: (event) => {
+					console.error("[recorder] error", event);
+					toast("Recording error — see console", "error");
+				},
+			});
+			studio.setStream({ recording: true });
+		} catch (err) {
+			if (diskSessionOpen) {
+				await bunRpc.cancelRecordingFile({}).catch(() => {});
+			}
+			throw err;
+		} finally {
+			this.starting = false;
+		}
 	}
 
 	async stop(): Promise<{ path?: string; canceled?: boolean }> {
@@ -75,7 +97,13 @@ class LocalRecorder {
 		await this.flushChunks();
 
 		const result = await bunRpc.finishRecordingFile({});
-		if (result.success && result.path) return { path: result.path };
+		if (result.success && result.path) {
+			const savedPath = result.path;
+			void import("../components/recording-review-dialog").then(({ openRecordingReviewDialog }) => {
+				openRecordingReviewDialog(savedPath);
+			});
+			return { path: savedPath };
+		}
 		if (result.reason === "canceled") return { canceled: true };
 		throw new IpcError(
 			result.error ?? "unknown",

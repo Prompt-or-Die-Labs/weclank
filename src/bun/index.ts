@@ -16,9 +16,9 @@ import { signup, login, checkUser, deleteAccount, lookupUsername } from "./db/us
 import { loadState, saveState, loadAllSecrets, setSecret, deleteSecret } from "./db/state";
 import { saveScript, saveGeneratedScript, loadScript, listScripts, deleteScript, updateScript } from "./db/scripts";
 import { randomUUID } from "node:crypto";
-import { open, unlink } from "node:fs/promises";
+import { open, unlink, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
 	buildFfmpegArgs,
 	buildRtmpUrl,
@@ -27,7 +27,11 @@ import {
 	type EncoderProfile,
 } from "./egress";
 import { augmentedProcessEnv } from "./ffmpeg-env";
-import { transcodeWebmFileToMp4 } from "./recording-transcode";
+import { transcodeWebmFileToMp4, trimMp4Segment } from "./recording-transcode";
+import {
+	registerRecordingPreviewPath,
+	unregisterRecordingPreviewToken,
+} from "./recording-preview-server";
 import {
 	buildWorkspaceLaunchPlans,
 	listWorkspaceApps,
@@ -388,6 +392,29 @@ export type PhotoBoothRPC = {
 				params: Record<string, never>;
 				response: { success: boolean; path?: string; reason?: string; error?: string };
 			};
+			/** Tear down a partial recording (no ffmpeg) after a failed or aborted start. */
+			cancelRecordingFile: {
+				params: Record<string, never>;
+				response: { success: boolean; error?: string };
+			};
+			/** Loopback URL for <video> preview of a finished MP4 (token must be released). */
+			registerRecordingPreview: {
+				params: { path: string };
+				response: { ok: boolean; url?: string; token?: string; error?: string };
+			};
+			unregisterRecordingPreview: {
+				params: { token: string };
+				response: { ok: boolean; error?: string };
+			};
+			deleteRecordingFile: {
+				params: { path: string };
+				response: { ok: boolean; error?: string };
+			};
+			/** Export `[startSec, endSec)` to a new file via save dialog + ffmpeg. */
+			saveRecordingTrimmed: {
+				params: { sourcePath: string; startSec: number; endSec: number };
+				response: { ok: boolean; path?: string; reason?: string; error?: string };
+			};
 			pickModelFile: {
 				params: { kind: "vrm" | "glb" };
 				response: {
@@ -730,6 +757,83 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 						success: false,
 						error: `${(error as Error).message}${staging ? ` (staging WebM kept at ${staging})` : ""}`,
 					};
+				}
+			},
+
+			cancelRecordingFile: async () => {
+				const writer = recordingWriter;
+				const staging = recordingStagingPath;
+				recordingWriter = null;
+				recordingStagingPath = "";
+				recordingOutputPath = "";
+				if (writer) {
+					try {
+						await writer.close();
+					} catch {
+						/* ignore */
+					}
+				}
+				if (staging) {
+					try {
+						await unlink(staging);
+					} catch {
+						/* ignore */
+					}
+				}
+				return { success: true };
+			},
+
+			registerRecordingPreview: async ({ path }) => {
+				if (!path?.trim()) return { ok: false, error: "path required" };
+				const r = await registerRecordingPreviewPath(path.trim());
+				if (r.ok) return { ok: true, url: r.url, token: r.token };
+				return { ok: false, error: r.error };
+			},
+
+			unregisterRecordingPreview: async ({ token }) => {
+				if (!token?.trim()) return { ok: false, error: "token required" };
+				unregisterRecordingPreviewToken(token.trim());
+				return { ok: true };
+			},
+
+			deleteRecordingFile: async ({ path }) => {
+				if (!path?.trim()) return { ok: false, error: "path required" };
+				try {
+					const resolved = resolve(path.trim());
+					const st = await stat(resolved);
+					if (!st.isFile()) return { ok: false, error: "Not a file" };
+					await unlink(resolved);
+					return { ok: true };
+				} catch (e) {
+					return { ok: false, error: (e as Error).message };
+				}
+			},
+
+			saveRecordingTrimmed: async ({ sourcePath, startSec, endSec }) => {
+				if (!sourcePath?.trim()) return { ok: false, error: "sourcePath required" };
+				const start = Number(startSec);
+				const end = Number(endSec);
+				if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start + 0.05) {
+					return { ok: false, error: "end must be at least 0.05s after start" };
+				}
+				try {
+					const chosenPaths = await Utils.openFileDialog({
+						startingFolder: Bun.env["HOME"] || "/",
+						allowedFileTypes: "mp4",
+						canChooseFiles: false,
+						canChooseDirectory: true,
+						allowsMultipleSelection: false,
+					});
+					if (!chosenPaths[0] || chosenPaths[0] === "") {
+						return { ok: false, reason: "canceled" };
+					}
+					const base = `weclank-trim-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.mp4`;
+					const savePath = `${chosenPaths[0]}/${base}`;
+					const resolvedSource = resolve(sourcePath.trim());
+					await trimMp4Segment(resolvedSource, savePath, start, end - start);
+					return { ok: true, path: savePath };
+				} catch (e) {
+					return { ok: false, error: (e as Error).message };
 				}
 			},
 

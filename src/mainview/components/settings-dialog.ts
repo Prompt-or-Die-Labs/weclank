@@ -261,8 +261,7 @@ async function toggleRecording(): Promise<void> {
 	try {
 		if (localRecorder.isRecording) {
 			const result = await localRecorder.stop();
-			if (result.path) toast(`Saved to ${result.path}`, "success");
-			else if (result.canceled) toast("Recording discarded");
+			if (result.canceled) toast("Recording discarded", "info");
 		} else {
 			await localRecorder.start();
 			toast("Recording started", "success");
