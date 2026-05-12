@@ -30,8 +30,14 @@ import { augmentedProcessEnv } from "./ffmpeg-env";
 import { transcodeWebmFileToMp4, trimMp4Segment } from "./recording-transcode";
 import {
 	registerRecordingPreviewPath,
+	registerImagePreviewPath,
 	unregisterRecordingPreviewToken,
 } from "./recording-preview-server";
+import {
+	importFilesToMediaLibrary,
+	listMediaLibrary,
+	saveMediaLibraryBytes,
+} from "./media-library-files";
 import {
 	buildWorkspaceLaunchPlans,
 	listWorkspaceApps,
@@ -424,6 +430,39 @@ export type PhotoBoothRPC = {
 					canceled?: boolean;
 					error?: string;
 				};
+			};
+			/** Single image file for voice-image participants (absolute path → libraryImagePath). */
+			pickImageFileForVoiceParticipant: {
+				params: Record<string, never>;
+				response: { path?: string; canceled?: boolean; error?: string };
+			};
+			/** Choose a root folder for on-disk media (QR exports, generated stills, imports). */
+			pickMediaLibraryRoot: {
+				params: Record<string, never>;
+				response: { path?: string; canceled?: boolean; error?: string };
+			};
+			/** Write raw base64 image bytes into `root/category/fileName`. */
+			saveMediaLibraryFile: {
+				params: { rootPath: string; category: string; fileName: string; base64: string };
+				response: { ok: boolean; path?: string; error?: string };
+			};
+			listMediaLibrary: {
+				params: { rootPath: string; categories: string[] };
+				response: {
+					ok: boolean;
+					categories?: Array<{ name: string; files: Array<{ name: string; path: string }> }>;
+					error?: string;
+				};
+			};
+			/** Multi image file picker → copy into category under root. */
+			importMediaLibraryFromDialog: {
+				params: { rootPath: string; category: string };
+				response: { ok: boolean; copied?: string[]; canceled?: boolean; error?: string };
+			};
+			/** Loopback URL for <img> from an absolute image path (unregister with `unregisterRecordingPreview`). */
+			registerMediaLibraryImagePreview: {
+				params: { path: string };
+				response: { ok: boolean; url?: string; token?: string; error?: string };
 			};
 			// RTMP egress via local ffmpeg. The renderer captures the
 			// composited canvas + mixed audio with MediaRecorder, slices
@@ -861,6 +900,88 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 				} catch (error) {
 					return { error: (error as Error).message };
 				}
+			},
+
+			pickImageFileForVoiceParticipant: async () => {
+				try {
+					const chosenPaths = await Utils.openFileDialog({
+						startingFolder: Bun.env["HOME"] || "/",
+						allowedFileTypes: "png",
+						canChooseFiles: true,
+						canChooseDirectory: false,
+						allowsMultipleSelection: false,
+					});
+					const path = chosenPaths[0];
+					if (!path || path === "") return { canceled: true };
+					const lower = path.toLowerCase();
+					if (!/\.(png|jpe?g|gif|webp)$/.test(lower)) {
+						return { error: "Choose a PNG, JPEG, WebP, or GIF image" };
+					}
+					return { path };
+				} catch (error) {
+					return { error: (error as Error).message };
+				}
+			},
+
+			pickMediaLibraryRoot: async () => {
+				try {
+					const chosenPaths = await Utils.openFileDialog({
+						startingFolder: Bun.env["HOME"] || "/",
+						allowedFileTypes: "png",
+						canChooseFiles: false,
+						canChooseDirectory: true,
+						allowsMultipleSelection: false,
+					});
+					const path = chosenPaths[0];
+					if (!path || path === "") return { canceled: true };
+					return { path };
+				} catch (error) {
+					return { error: (error as Error).message };
+				}
+			},
+
+			saveMediaLibraryFile: async ({ rootPath, category, fileName, base64 }) => {
+				try {
+					const bytes = base64ToBytes(base64);
+					const r = await saveMediaLibraryBytes({ rootPath, category, fileName, bytes });
+					if (!r.ok) return { ok: false, error: r.error };
+					return { ok: true, path: r.path };
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			listMediaLibrary: async ({ rootPath, categories }) => {
+				const r = await listMediaLibrary({ rootPath, categories });
+				if (!r.ok) return { ok: false, error: r.error };
+				return { ok: true, categories: r.categories };
+			},
+
+			importMediaLibraryFromDialog: async ({ rootPath, category }) => {
+				try {
+					const chosenPaths = await Utils.openFileDialog({
+						startingFolder: Bun.env["HOME"] || "/",
+						canChooseFiles: true,
+						canChooseDirectory: false,
+						allowsMultipleSelection: true,
+					});
+					if (!chosenPaths.length || chosenPaths.every((p) => !p || p === "")) {
+						return { ok: false, canceled: true };
+					}
+					const paths = chosenPaths.filter((p) => p && p !== "");
+					const r = await importFilesToMediaLibrary({ rootPath, category, sourcePaths: paths });
+					if (!r.ok) return { ok: false, error: r.error };
+					return { ok: true, copied: r.copied };
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			registerMediaLibraryImagePreview: async ({ path }) => {
+				if (!path?.trim()) return { ok: false, error: "path required" };
+				const r = await registerImagePreviewPath(path.trim());
+				if (r.ok) return { ok: true, url: r.url, token: r.token };
+				return { ok: false, error: r.error };
 			},
 
 			startStreamEgress: async ({ destinations }) => {

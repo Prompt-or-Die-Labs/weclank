@@ -56,3 +56,4 @@ API keys + RTMP credentials stored plaintext in SQLite `user_secrets` table. Not
 ## Learned Workspace Facts
 - Product direction in recent sessions emphasizes cleanly wiring image, audio, transcription, and vision paths in the app and keeping host or co-host speech available to agents via transcription without extra manual steps.
 - UI work has targeted a cleaner producer tray plus a private, developer-oriented chat surface alongside broadcast-facing chat, with transcription intended to feed banter/agent context automatically.
+- Persist broadcast graphics and stills in a user-chosen on-disk media library (root + category subfolders); reuse the loopback preview server so WKWebView can load `libraryImagePath` assets in voice-image tiles the same way it loads reviewed MP4s.

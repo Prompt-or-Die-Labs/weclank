@@ -95,7 +95,7 @@ export class AppHeader extends Component<State> {
 				${stream.recording ? `<span class="rec-badge" aria-label="Recording to disk">REC</span>` : ""}
 				${elapsed ? `<span class="stream-timer tabular" aria-label="Time live">${elapsed}</span>` : ""}
 				<button class="utilities-btn" id="utilities-menu" aria-label="Open utility windows">Utilities</button>
-				<button class="rec-btn ${stream.recording ? "rec-btn--on" : ""}" id="rec-toggle" aria-label="${stream.recording ? "Stop recording" : "Start recording to disk"}" aria-pressed="${stream.recording ? "true" : "false"}">REC</button>
+				<button class="rec-btn ${stream.recording ? "rec-btn--on" : ""}" id="rec-toggle" aria-label="${stream.recording ? "Stop recording to disk" : "Start recording to disk"}" aria-pressed="${stream.recording ? "true" : "false"}">${stream.recording ? "STOP" : "REC"}</button>
 				<button class="stream-status" id="stream-status" aria-label="Stream settings">
 					<div class="stream-status__row">
 						<span class="stream-status__title">${stream.live ? "LIVE" : "READY"}</span>
@@ -248,7 +248,7 @@ export class AppHeader extends Component<State> {
 			<button class="menu__item" data-quality="720p" aria-pressed="${quality === "720p"}">720p</button>
 			<button class="menu__item" data-quality="1080p" aria-pressed="${quality === "1080p"}">1080p</button>
 			<div class="menu__section">Recording</div>
-			<button class="menu__item" data-record="toggle">${localRecorder.isRecording ? "Stop local recording" : "Start local recording"}</button>
+			<button class="menu__item" data-record="toggle">${studio.state.stream.recording || localRecorder.isRecording ? "Stop local recording" : "Start local recording"}</button>
 		`;
 		const popover = new Popover({ anchor, content: menu });
 		menu.querySelectorAll<HTMLButtonElement>("[data-quality]").forEach((btn) => {
@@ -291,7 +291,8 @@ export class AppHeader extends Component<State> {
 	}
 
 	private async toggleRecording(): Promise<void> {
-		if (localRecorder.isRecording) {
+		const recording = studio.state.stream.recording || localRecorder.isRecording;
+		if (recording) {
 			try {
 				const result = await localRecorder.stop();
 				if (result.canceled) toast("Recording discarded", "info");

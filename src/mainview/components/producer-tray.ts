@@ -239,7 +239,7 @@ export class ProducerTray extends Component<State> {
 					</label>
 
 					<div class="producer-tray__tool-buttons">
-						<button class="producer-tray__tool-btn ${this.state.recording ? "is-on" : ""}" data-action="record">${this.state.recording ? "● Recording" : "○ Record"}</button>
+						<button class="producer-tray__tool-btn ${this.state.recording ? "is-on" : ""}" data-action="record">${this.state.recording ? "■ STOP" : "○ REC"}</button>
 						<button class="producer-tray__tool-btn" data-action="panic">Panic mute</button>
 					</div>
 				</div>
@@ -634,10 +634,11 @@ export class ProducerTray extends Component<State> {
 
 	private async toggleRecord(): Promise<void> {
 		try {
-		if (localRecorder.isRecording) {
-			const result = await localRecorder.stop();
-			if (result.canceled) toast("Recording discarded", "info");
-		} else {
+			const recording = studio.state.stream.recording || localRecorder.isRecording;
+			if (recording) {
+				const result = await localRecorder.stop();
+				if (result.canceled) toast("Recording discarded", "info");
+			} else {
 				await localRecorder.start();
 				toast("Recording", "success");
 			}

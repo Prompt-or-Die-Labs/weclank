@@ -89,7 +89,8 @@ function cycleSidebarTab(delta: 1 | -1): void {
 }
 
 async function toggleRecording(): Promise<void> {
-	if (localRecorder.isRecording) {
+	const recording = studio.state.stream.recording || localRecorder.isRecording;
+	if (recording) {
 		try {
 			const result = await localRecorder.stop();
 			if (result.canceled) toast("Recording discarded", "info");

@@ -2,6 +2,7 @@
 // pulse driven by voice amplitude so the tile doesn't feel dead during
 // speech.
 
+import { bunRpc } from "../rpc";
 import type { AgentRenderer, RendererContext } from "./renderer";
 import type { Participant } from "../core/types";
 
@@ -13,6 +14,8 @@ export class ImageRenderer implements AgentRenderer {
 	private analyser: AnalyserNode | null = null;
 	private data: Uint8Array<ArrayBuffer> | null = null;
 	private raf = 0;
+	/** Loopback preview token — cleared on detach via `unregisterRecordingPreview`. */
+	private libraryPreviewToken: string | null = null;
 
 	async attach(ctx: RendererContext, participant: Participant): Promise<void> {
 		this.canvas = document.createElement("canvas");
@@ -24,8 +27,22 @@ export class ImageRenderer implements AgentRenderer {
 		this.analyser = ctx.analyser ?? null;
 		if (this.analyser) this.data = new Uint8Array(new ArrayBuffer(this.analyser.frequencyBinCount));
 
+		const libPath = participant.visual?.libraryImagePath?.trim();
 		const url = participant.visual?.imageUrl;
-		if (url) {
+		if (libPath) {
+			const reg = await bunRpc.registerMediaLibraryImagePreview({ path: libPath });
+			if (!reg.ok || !reg.url || !reg.token) {
+				throw new Error(reg.error ?? "Could not open library image preview");
+			}
+			this.libraryPreviewToken = reg.token;
+			await new Promise<void>((resolve, reject) => {
+				this.img = new Image();
+				this.img.crossOrigin = "anonymous";
+				this.img.onload = () => resolve();
+				this.img.onerror = () => reject(new Error(`Failed to load library image`));
+				this.img.src = reg.url!;
+			});
+		} else if (url) {
 			await new Promise<void>((resolve, reject) => {
 				this.img = new Image();
 				this.img.crossOrigin = "anonymous";
@@ -45,6 +62,10 @@ export class ImageRenderer implements AgentRenderer {
 
 	detach(): void {
 		cancelAnimationFrame(this.raf);
+		if (this.libraryPreviewToken) {
+			void bunRpc.unregisterRecordingPreview({ token: this.libraryPreviewToken }).catch(() => {});
+			this.libraryPreviewToken = null;
+		}
 		this.canvas?.remove();
 		this.canvas = null;
 		this.ctx2d = null;

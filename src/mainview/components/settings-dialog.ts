@@ -151,7 +151,7 @@ function renderSettings(): string {
 			</div>
 			<div class="settings-grid settings-grid--two">
 				<button type="button" class="settings-action" data-action="screen">Add screen capture</button>
-				<button type="button" class="settings-action" data-action="record">${localRecorder.isRecording ? "Stop recording" : "Start recording"}</button>
+				<button type="button" class="settings-action" data-action="record">${studio.state.stream.recording || localRecorder.isRecording ? "Stop recording" : "Start recording"}</button>
 			</div>
 		</section>
 
@@ -259,7 +259,8 @@ async function copyProgramState(): Promise<void> {
 
 async function toggleRecording(): Promise<void> {
 	try {
-		if (localRecorder.isRecording) {
+		const recording = studio.state.stream.recording || localRecorder.isRecording;
+		if (recording) {
 			const result = await localRecorder.stop();
 			if (result.canceled) toast("Recording discarded", "info");
 		} else {

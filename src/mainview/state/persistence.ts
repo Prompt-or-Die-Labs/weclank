@@ -27,7 +27,12 @@ interface PersistedParticipant {
 	displayName: string;
 	statusLine?: string;
 	kind: Participant["kind"];
-	visual?: { imageUrl?: string; backgroundColor?: string; animations?: { idle?: string; talking?: string } };
+	visual?: {
+		imageUrl?: string;
+		libraryImagePath?: string;
+		backgroundColor?: string;
+		animations?: { idle?: string; talking?: string };
+	};
 	tts?: Participant["tts"];
 	banter?: Participant["banter"];
 	videoDeviceId?: string;
@@ -173,6 +178,7 @@ export function serializeState(state: StudioState): PersistedState {
 			visual: p.visual
 				? {
 						imageUrl: p.visual.imageUrl?.startsWith("blob:") ? undefined : p.visual.imageUrl,
+						libraryImagePath: p.visual.libraryImagePath,
 						backgroundColor: p.visual.backgroundColor,
 						animations: p.visual.animations,
 					}

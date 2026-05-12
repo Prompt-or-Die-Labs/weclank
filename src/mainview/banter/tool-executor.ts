@@ -272,6 +272,29 @@ async function doGenerateBroadcastImage(
 		expiresAt: now + GENERATED_IMAGE_OVERLAY_MS,
 	};
 	streamOverlays.add(overlay);
+	const root = studio.state.studioPrefs?.mediaLibraryRoot?.trim();
+	if (root) {
+		const slug = args.prompt
+			.slice(0, 40)
+			.replace(/[^\w\-]+/g, "_")
+			.replace(/^_+|_+$/g, "") || "image";
+		const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+		const fileName = `${slug}-${ts}.png`;
+		void (async () => {
+			try {
+				const { savePngDataUrlToMediaLibrary } = await import("../media/media-library");
+				const r = await savePngDataUrlToMediaLibrary({
+					rootPath: root,
+					category: "Generated",
+					fileName,
+					dataUrl,
+				});
+				if (!r.ok) console.warn("[banter] media library save failed", r.error);
+			} catch (e) {
+				console.warn("[banter] media library save threw", e);
+			}
+		})();
+	}
 	return {
 		id: overlay.id,
 		kind: overlay.kind,

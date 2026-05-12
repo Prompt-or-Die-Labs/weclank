@@ -58,12 +58,14 @@ export function getUtilityWindowKind(): string | null {
 }
 
 async function toggleRecordingFromNativeMenu(): Promise<void> {
-	const [{ localRecorder }, { toast }, { userMessageFor }] = await Promise.all([
+	const [{ localRecorder }, { studio }, { toast }, { userMessageFor }] = await Promise.all([
 		import("./streaming/recorder"),
+		import("./state/studio-store"),
 		import("./components/overlays"),
 		import("./core/errors"),
 	]);
-	if (localRecorder.isRecording) {
+	const recording = studio.state.stream.recording || localRecorder.isRecording;
+	if (recording) {
 		try {
 			const result = await localRecorder.stop();
 			if (result.canceled) toast("Recording discarded", "info");

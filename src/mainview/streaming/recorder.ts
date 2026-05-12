@@ -15,8 +15,28 @@ import { toast } from "../components/overlays";
 import { arrayBufferToBase64 } from "./base64";
 import { startBroadcastCapture, type BroadcastCaptureSession } from "./capture";
 
+const RECORDER_STOP_TIMEOUT_MS = 45_000;
+
+function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+	return new Promise((resolve, reject) => {
+		const id = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+		p.then(
+			(v) => {
+				clearTimeout(id);
+				resolve(v);
+			},
+			(e) => {
+				clearTimeout(id);
+				reject(e);
+			},
+		);
+	});
+}
+
 class LocalRecorder {
 	private capture: BroadcastCaptureSession | null = null;
+	/** Coalesces concurrent `stop()` calls so only one `finishRecordingFile` runs. */
+	private stopInFlight: Promise<{ path?: string; canceled?: boolean }> | null = null;
 	/** True while the save dialog or Bun file open is in flight — prevents a
 	 * second start from hitting "recording already in progress" on the main
 	 * process before `this.capture` is assigned. */
@@ -28,7 +48,11 @@ class LocalRecorder {
 	private writeChain: Promise<void> = Promise.resolve();
 
 	get isRecording(): boolean {
-		return this.capture !== null && this.capture.recorder.state !== "inactive";
+		// Must stay true until `stop()` clears `this.capture` in `finally`. If we
+		// keyed off MediaRecorder.state === "inactive", the instant `stop()` is
+		// called we'd flip false while flush/ffmpeg still run — the next "REC"
+		// click would try `start()` and hit "already recording".
+		return this.capture !== null;
 	}
 
 	get elapsedMs(): number {
@@ -50,7 +74,13 @@ class LocalRecorder {
 		let diskSessionOpen = false;
 		try {
 			const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-			const result = await bunRpc.startRecordingFile({ suggestedName: `weclank-${ts}.mp4` });
+			const suggestedName = `weclank-${ts}.mp4`;
+			let result = await bunRpc.startRecordingFile({ suggestedName });
+			if (!result.success && result.error === "Recording already in progress") {
+				// Orphaned main-process session (e.g. prior stop hung before finish) — clear and retry once.
+				await bunRpc.cancelRecordingFile({}).catch(() => {});
+				result = await bunRpc.startRecordingFile({ suggestedName });
+			}
 			if (!result.success) {
 				if (result.reason === "canceled") return;
 				throw new IpcError(
@@ -86,29 +116,55 @@ class LocalRecorder {
 	}
 
 	async stop(): Promise<{ path?: string; canceled?: boolean }> {
-		const capture = this.capture;
-		this.capture = null;
-		studio.setStream({ recording: false });
-		if (!capture) {
+		if (this.stopInFlight) return this.stopInFlight;
+		if (!this.capture) {
+			studio.setStream({ recording: false });
 			return { canceled: true };
 		}
 
-		await capture.stop();
-		await this.flushChunks();
+		this.stopInFlight = this.stopAndFinalize().finally(() => {
+			this.stopInFlight = null;
+		});
+		return this.stopInFlight;
+	}
 
-		const result = await bunRpc.finishRecordingFile({});
-		if (result.success && result.path) {
-			const savedPath = result.path;
-			void import("../components/recording-review-dialog").then(({ openRecordingReviewDialog }) => {
-				openRecordingReviewDialog(savedPath);
-			});
-			return { path: savedPath };
+	private async stopAndFinalize(): Promise<{ path?: string; canceled?: boolean }> {
+		const capture = this.capture;
+		if (!capture) {
+			studio.setStream({ recording: false });
+			return { canceled: true };
 		}
-		if (result.reason === "canceled") return { canceled: true };
-		throw new IpcError(
-			result.error ?? "unknown",
-			`Couldn't finalize recording: ${result.error ?? "no detail"}`,
-		);
+
+		let bunSessionFinished = false;
+
+		try {
+			await promiseWithTimeout(capture.stop(), RECORDER_STOP_TIMEOUT_MS, "MediaRecorder stop");
+			await this.flushChunks();
+
+			const result = await bunRpc.finishRecordingFile({});
+			if (result.success && result.path) {
+				bunSessionFinished = true;
+				const savedPath = result.path;
+				void import("../components/recording-review-dialog").then(({ openRecordingReviewDialog }) => {
+					openRecordingReviewDialog(savedPath);
+				});
+				return { path: savedPath };
+			}
+			if (result.reason === "canceled") {
+				bunSessionFinished = true;
+				return { canceled: true };
+			}
+			throw new IpcError(
+				result.error ?? "unknown",
+				`Couldn't finalize recording: ${result.error ?? "no detail"}`,
+			);
+		} finally {
+			this.capture = null;
+			studio.setStream({ recording: false });
+			if (!bunSessionFinished) {
+				await bunRpc.cancelRecordingFile({}).catch(() => {});
+			}
+		}
 	}
 
 	private async shipChunk(blob: Blob): Promise<void> {

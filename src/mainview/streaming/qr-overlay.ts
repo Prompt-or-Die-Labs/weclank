@@ -13,13 +13,17 @@ export async function addQrOverlay(args: {
 	label?: string;
 	position?: OverlayPosition;
 	durationMs?: number;
+	/** When set (e.g. from the dialog), reused instead of generating again. */
+	imageDataUrl?: string;
 }): Promise<OverlayId> {
-	const dataUrl = await QRCode.toDataURL(args.text, {
-		errorCorrectionLevel: "M",
-		margin: 1,
-		width: 320,
-		color: { dark: "#000000", light: "#ffffff" },
-	});
+	const dataUrl =
+		args.imageDataUrl ??
+		(await QRCode.toDataURL(args.text, {
+			errorCorrectionLevel: "M",
+			margin: 1,
+			width: 320,
+			color: { dark: "#000000", light: "#ffffff" },
+		}));
 	const id = mintId("qr", overlayId);
 	const now = Date.now();
 	streamOverlays.add({

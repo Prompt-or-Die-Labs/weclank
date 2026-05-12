@@ -122,7 +122,13 @@ class RendererFarm {
 }
 
 function rendererSignature(p: Participant): string {
-	return [p.kind, p.visual?.modelUrl ?? "", p.visual?.imageUrl ?? "", p.videoDeviceId ?? ""].join("|");
+	return [
+		p.kind,
+		p.visual?.modelUrl ?? "",
+		p.visual?.imageUrl ?? "",
+		p.visual?.libraryImagePath ?? "",
+		p.videoDeviceId ?? "",
+	].join("|");
 }
 
 export const rendererFarm = new RendererFarm();

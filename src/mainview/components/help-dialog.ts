@@ -14,7 +14,7 @@ export async function openHelpDialog(): Promise<void> {
 				<dt><kbd>⌘ 1</kbd> .. <kbd>⌘ 9</kbd></dt><dd>Switch to scene N</dd>
 				<dt><kbd>⌘ K</kbd></dt><dd>Command palette — type to filter; <kbd>↑</kbd><kbd>↓</kbd> move; <kbd>PgUp</kbd><kbd>PgDn</kbd> page; <kbd>Home</kbd><kbd>End</kbd> jump; <kbd>Enter</kbd> runs</dd>
 				<dt><kbd>⌘ ⇧ L</kbd></dt><dd>Go Live / stop streaming</dd>
-				<dt><kbd>⌘ ⇧ R</kbd></dt><dd>Start / stop local recording — you pick a folder; the file is <strong>MP4</strong> (H.264 + AAC) produced by ffmpeg after you stop. When you stop, a <strong>Review recording</strong> window opens: preview, set start/end for one trim, save a trimmed copy, delete the file, or share (system share sheet when available, otherwise path to clipboard). MediaRecorder still captures WebM internally, then the main process transcodes.</dd>
+				<dt><kbd>⌘ ⇧ R</kbd></dt><dd>Start / stop local recording (same as the header <strong>REC</strong> / <strong>STOP</strong> button). You pick a folder; the file is <strong>MP4</strong> (H.264 + AAC) produced by ffmpeg after you stop. When you stop, a <strong>Review recording</strong> window opens: preview, set start/end for one trim, save a trimmed copy, delete the file, or share (system share sheet when available, otherwise path to clipboard). MediaRecorder still captures WebM internally, then the main process transcodes.</dd>
 				<dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Cycle the right-sidebar tab</dd>
 				<dt><kbd>↑↓←→</kbd></dt><dd>Nudge the selected source (Shift = 10×)</dd>
 				<dt><kbd>Esc</kbd></dt><dd>Deselect source</dd>

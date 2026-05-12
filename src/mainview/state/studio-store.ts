@@ -36,6 +36,7 @@ import type {
 	StreamOverlay,
 	MusicTrack,
 } from "../core/types";
+import { DEFAULT_MEDIA_LIBRARY_CATEGORIES } from "../core/types";
 
 const HOST_ID = participantId("host");
 
@@ -105,7 +106,10 @@ const initial: StudioState = {
 	streamOverlays: [],
 	music: { volume: 0.4, current: null },
 	focusedParticipantId: null,
-	studioPrefs: { focusMode: "full" },
+	studioPrefs: {
+		focusMode: "full",
+		mediaLibraryCategories: [...DEFAULT_MEDIA_LIBRARY_CATEGORIES],
+	},
 };
 
 class StudioStore extends Store<StudioState> {
@@ -133,10 +137,10 @@ class StudioStore extends Store<StudioState> {
 	installRestored(restored: Partial<StudioState> | null): void {
 		if (!restored) return;
 		this.participantCleanups.clear();
-		const mergedPrefs: StudioPrefs = {
+		const mergedPrefs = defaultStudioPrefs({
 			...initial.studioPrefs,
 			...restored.studioPrefs,
-		};
+		});
 		this.set({ ...initial, ...restored, studioPrefs: mergedPrefs });
 
 		for (const rawId of Object.keys(restored.participants ?? {})) {
@@ -492,13 +496,24 @@ class StudioStore extends Store<StudioState> {
 
 	setStudioPrefs(patch: Partial<StudioPrefs>): void {
 		this.set((s) => ({
-			studioPrefs: { ...defaultStudioPrefs(s.studioPrefs), ...patch },
+			studioPrefs: defaultStudioPrefs({ ...defaultStudioPrefs(s.studioPrefs), ...patch }),
 		}));
 	}
 }
 
 function defaultStudioPrefs(p?: StudioPrefs): StudioPrefs {
-	return { focusMode: "full", ...p };
+	const cats = DEFAULT_MEDIA_LIBRARY_CATEGORIES;
+	if (!p) {
+		return { focusMode: "full", mediaLibraryCategories: [...cats] };
+	}
+	return {
+		focusMode: p.focusMode ?? "full",
+		mediaLibraryRoot: p.mediaLibraryRoot,
+		mediaLibraryCategories:
+			p.mediaLibraryCategories !== undefined && p.mediaLibraryCategories.length > 0
+				? p.mediaLibraryCategories
+				: [...cats],
+	};
 }
 
 export const studio = new StudioStore();

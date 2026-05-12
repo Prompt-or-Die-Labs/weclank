@@ -26,6 +26,8 @@ export type AssistantRole =
 
 export interface VisualConfig {
 	imageUrl?: string;
+	/** Absolute path to a library image on disk; loaded via loopback preview in the image renderer. */
+	libraryImagePath?: string;
 	modelUrl?: string;
 	backgroundColor?: string;
 	// Animation triggers (idle, talking) — names match the model's clips.
@@ -226,10 +228,17 @@ export interface TranscriptConfig {
 /** Persisted UI / onboarding preferences — safe to merge on restore. */
 export type StudioFocusMode = "broadcast" | "full";
 
+/** Default category folders under the media library root. */
+export const DEFAULT_MEDIA_LIBRARY_CATEGORIES: string[] = ["QR codes", "Generated", "Uploads"];
+
 export interface StudioPrefs {
 	/** When `broadcast`, the UI de-emphasizes AI-heavy paths until the user
 	 * is ready (focus on RTMP + camera first). */
 	focusMode?: StudioFocusMode;
+	/** Absolute root directory for saved QR PNGs, generated stills, and imports. */
+	mediaLibraryRoot?: string;
+	/** Subfolder names under the library root (each becomes a category). */
+	mediaLibraryCategories?: string[];
 }
 
 export interface StudioState {

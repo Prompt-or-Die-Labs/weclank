@@ -116,7 +116,18 @@ export async function createParticipantFromKind(
 		case "voice":
 			break;
 		case "voice-image": {
-			const url = window.prompt("Image URL (or local file path)");
+			const r = await bunRpc.pickImageFileForVoiceParticipant({});
+			if (!r.canceled && r.path) {
+				visual = { libraryImagePath: r.path };
+				const seg = r.path.split(/[/\\]/).pop();
+				if (seg) displayName = seg.replace(/\.[^.]+$/, "").slice(0, 48) || displayName;
+				break;
+			}
+			if (r.error) {
+				toast(r.error, "error");
+				return null;
+			}
+			const url = window.prompt("Image URL (https://… or data URL). Leave empty to cancel.")?.trim();
 			if (!url) return null;
 			visual = { imageUrl: url };
 			break;
@@ -239,6 +250,65 @@ export async function createParticipantFromKind(
 		studio.addSource(scene.id, id);
 	}
 
+	return id;
+}
+
+/** Add a voice-image agent whose portrait is a file under the media library (absolute path). */
+export async function addVoiceImageFromLibraryPath(
+	libraryImagePath: string,
+	opts: CreateOptions = {},
+): Promise<ParticipantId | null> {
+	const trimmed = libraryImagePath.trim();
+	if (!trimmed) return null;
+	const id = mintId("p", participantId);
+	const seg = trimmed.split(/[/\\]/).pop();
+	const displayName = (seg?.replace(/\.[^.]+$/, "") ?? defaultName("voice-image")).slice(0, 48);
+	const visual: VisualConfig = { libraryImagePath: trimmed };
+	const kind = "voice-image" as const;
+
+	const config = await pickTTSConfig();
+	if (!config) return null;
+	const tts = config;
+	let audioStream: MediaStream | undefined;
+	try {
+		audioStream = initVoiceRoute(id, config, { updateParticipant: false }).stream;
+	} catch (err) {
+		toast(`TTS init failed: ${userMessageFor(err)}`, "error");
+		return null;
+	}
+
+	const participant: Participant = {
+		id,
+		displayName,
+		statusLine: "AI co-host",
+		kind,
+		muted: false,
+		cameraOff: false,
+		isAgent: true,
+		visual,
+		tts,
+		audioStream,
+	};
+
+	const cleanup = (): void => {
+		banterEngine.stop(id);
+		disposeVoiceRoute(id);
+		void import("../components/renderer-farm").then(({ rendererFarm }) => rendererFarm.dispose(id));
+	};
+
+	studio.addParticipant(participant, cleanup);
+	const { rendererFarm } = await import("../components/renderer-farm");
+	try {
+		await rendererFarm.ensureRenderer(participant);
+	} catch (err) {
+		studio.removeParticipant(id);
+		toast(`Couldn't add ${displayName}: ${userMessageFor(err)}`, "error");
+		return null;
+	}
+	if (opts.autoAssign !== false) {
+		const scene = studio.activeScene;
+		studio.addSource(scene.id, id);
+	}
 	return id;
 }
 
