@@ -1,0 +1,7 @@
+# Bun config — only the test-runner block is meaningful right now. The
+# preload registers happy-dom's DOM globals (window, document, fetch,
+# localStorage, etc.) so DOM-touching modules can be unit-tested without
+# spinning up the full Electrobun runtime.
+
+[test]
+preload = ["./src/test-setup.ts"]

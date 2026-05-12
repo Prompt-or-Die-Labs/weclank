@@ -1,0 +1,50 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+	"files": {
+		"includes": ["src/**/*.ts"],
+		"experimentalScannerIgnores": ["build", "node_modules", "dist", "src/mainview/**/*.test.ts"]
+	},
+	"formatter": {
+		"enabled": false
+	},
+	"assist": {
+		"enabled": false
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": false,
+			"suspicious": {
+				"noExplicitAny": "warn",
+				"noDoubleEquals": "error",
+				"noShadowRestrictedNames": "error",
+				"noDuplicateCase": "error",
+				"noFallthroughSwitchClause": "error",
+				"noFunctionAssign": "error",
+				"noImplicitAnyLet": "error",
+				"noUnsafeNegation": "error"
+			},
+			"correctness": {
+				"noConstantCondition": "error",
+				"noConstAssign": "error",
+				"noEmptyCharacterClassInRegex": "error",
+				"noInvalidConstructorSuper": "error",
+				"noSelfAssign": "error",
+				"noSwitchDeclarations": "off",
+				"noUnreachable": "error",
+				"useExhaustiveDependencies": "off"
+			},
+			"complexity": {
+				"noUselessFragments": "error",
+				"noUselessRename": "error",
+				"noUselessTypeConstraint": "error",
+				"noBannedTypes": "warn"
+			},
+			"style": {
+				"noNonNullAssertion": "off",
+				"useNodejsImportProtocol": "error",
+				"useShorthandFunctionType": "warn"
+			}
+		}
+	}
+}

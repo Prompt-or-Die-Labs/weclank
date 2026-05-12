@@ -1,0 +1,29 @@
+{
+	"name": "weclank",
+	"version": "0.1.0",
+	"description": "Open-source local-first streaming studio with AI co-hosts",
+	"scripts": {
+		"start": "electrobun dev",
+		"dev": "electrobun dev --watch",
+		"build:canary": "electrobun build --env=canary",
+		"test": "bun test",
+		"test:watch": "bun test --watch",
+		"lint": "biome check src",
+		"format": "biome format --write src",
+		"check": "bunx tsc --noEmit && biome check src && bun test"
+	},
+	"dependencies": {
+		"@pixiv/three-vrm": "^3.5.2",
+		"electrobun": "1.18.1",
+		"qrcode": "^1.5.4",
+		"three": "^0.184.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.15",
+		"@happy-dom/global-registrator": "^20.9.0",
+		"@types/bun": "latest",
+		"@types/qrcode": "^1.5.6",
+		"@types/three": "^0.184.1",
+		"happy-dom": "^20.9.0"
+	}
+}
