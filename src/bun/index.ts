@@ -23,6 +23,7 @@ import {
 	type EgressStats,
 	type EncoderProfile,
 } from "./egress";
+import { augmentedProcessEnv } from "./ffmpeg-env";
 import {
 	buildWorkspaceLaunchPlans,
 	listWorkspaceApps,
@@ -323,7 +324,11 @@ async function detectVideoEncoder(): Promise<EncoderProfile> {
 
 	let available = "";
 	try {
-		const proc = Bun.spawn(["ffmpeg", "-hide_banner", "-encoders"], { stdout: "pipe", stderr: "ignore" });
+		const proc = Bun.spawn(["ffmpeg", "-hide_banner", "-encoders"], {
+			stdout: "pipe",
+			stderr: "ignore",
+			env: augmentedProcessEnv(),
+		});
 		available = await new Response(proc.stdout).text();
 		await proc.exited;
 	} catch {
@@ -746,10 +751,12 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 				}
 				try {
 					const encoder = await detectVideoEncoder();
-					const proc = Bun.spawn(
-						buildFfmpegArgs(encoder, targets),
-						{ stdin: "pipe", stdout: "ignore", stderr: "pipe" },
-					);
+					const proc = Bun.spawn(buildFfmpegArgs(encoder, targets), {
+						stdin: "pipe",
+						stdout: "ignore",
+						stderr: "pipe",
+						env: augmentedProcessEnv(),
+					});
 					// The cast keeps TS happy across Bun versions where
 					// stdin's inferred type drifts between WritableStream
 					// and FileSink.
@@ -859,7 +866,11 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 
 			getFfmpegProbe: async () => {
 				try {
-					const proc = Bun.spawn(["ffmpeg", "-version"], { stdout: "pipe", stderr: "pipe" });
+					const proc = Bun.spawn(["ffmpeg", "-version"], {
+						stdout: "pipe",
+						stderr: "pipe",
+						env: augmentedProcessEnv(),
+					});
 					const text = await new Response(proc.stdout).text();
 					const code = await proc.exited;
 					if (code !== 0) return { ok: false, error: "ffmpeg returned a non-zero exit code" };

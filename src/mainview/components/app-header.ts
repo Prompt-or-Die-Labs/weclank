@@ -14,8 +14,9 @@ import { hasSecret } from "../auth/secrets-cache";
 import { egressController } from "../streaming/egress";
 import { pickRtmpDestination } from "../streaming/rtmp-config-dialog";
 import { localRecorder } from "../streaming/recorder";
-import { userMessageFor } from "../core/errors";
+import { StudioError, userMessageFor } from "../core/errors";
 import { bunRpc } from "../rpc";
+import { openGoLiveFailedDialog } from "./go-live-failed-dialog";
 import { openSettingsDialog } from "./settings-dialog";
 
 interface State {
@@ -275,7 +276,8 @@ export class AppHeader extends Component<State> {
 				studio.setStream({ live: true });
 				toast(`Live on ${result.destinations.length} destination${result.destinations.length > 1 ? "s" : ""}`, "success");
 			} catch (err) {
-				toast(`Go live failed: ${userMessageFor(err)}`, "error");
+				const detail = err instanceof StudioError ? err.message : userMessageFor(err);
+				openGoLiveFailedDialog(detail);
 			}
 		} else {
 			try {

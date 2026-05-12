@@ -3876,6 +3876,53 @@ input, textarea, select { font: inherit; }
 	}
 }
 
+/* ---------- Go live / ffmpeg help dialog ---------- */
+.go-live-failed-dialog {
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-1);
+}
+.go-live-failed-dialog p {
+	margin: 0 0 var(--space-2);
+}
+.go-live-failed-dialog__detail {
+	margin: 0 0 var(--space-2);
+	padding: var(--space-2);
+	background: var(--bg-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	line-height: 1.45;
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: var(--text-1);
+}
+.go-live-failed-dialog__detail strong {
+	color: var(--danger);
+	font-weight: 600;
+}
+.go-live-failed-dialog__muted {
+	font-size: 12px;
+	color: var(--text-2);
+	margin: 0 0 var(--space-2);
+}
+.go-live-failed-dialog__muted code {
+	font-size: 11px;
+}
+.go-live-failed-dialog__probe {
+	min-height: 1.25em;
+	margin-bottom: var(--space-2);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--text-2);
+}
+.go-live-failed-dialog__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+
 /* ---------- Component error boundary fallback ---------- */
 .component-error {
 	padding: var(--space-3);
