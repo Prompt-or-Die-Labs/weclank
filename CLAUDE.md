@@ -188,6 +188,8 @@ Auto-discovers a non-agent audio source (mic kind or camera+mic combo) and re-at
 
 `streaming/stream-engine.ts` composites the active scene onto a canvas at the preset's resolution + fps. `captureStream()` + mixer audio = one MediaStream.
 
+**Local disk recording** (`streaming/recorder.ts` + Bun `startRecordingFile` / `writeRecordingChunk` / `finishRecordingFile`) uses the **same** composited canvas + mixer audio as egress. MediaRecorder still emits **WebM** (VP8/9 + Opus); chunks are written to a **temp WebM** under the OS temp directory, then on stop Bun runs **ffmpeg** (`recording-transcode.ts`) to produce an **H.264 + AAC MP4** (`+faststart`) at the path you chose. Any tile the engine can draw — including a **screen** participant (`getDisplayMedia` → `ScreenRenderer`'s `<video>` as `CanvasImageSource`) — appears in the recording as long as that source is in the active scene and visible. Screen rows use **video only** from the picker (`audio: false` in `screen-renderer.ts`); system/tab audio from the share is not captured unless the user routes it through mic/virtual cable. Chunk writes are **serialized** so the last `dataavailable` blob is flushed before the staging file is closed and transcoded.
+
 `streaming/presets.ts` defines tiers (480p / 720p / 1080p) with per-tier MIME, fps, bitrate. `pickSupportedMime()` falls back to VP8 if VP9 isn't supported by the runtime.
 
 `streaming/egress.ts` is the renderer-side egress controller:

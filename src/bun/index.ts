@@ -15,7 +15,10 @@ import { openDb, getDbPath } from "./db/schema";
 import { signup, login, checkUser, deleteAccount, lookupUsername } from "./db/users";
 import { loadState, saveState, loadAllSecrets, setSecret, deleteSecret } from "./db/state";
 import { saveScript, saveGeneratedScript, loadScript, listScripts, deleteScript, updateScript } from "./db/scripts";
-import { open } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { open, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	buildFfmpegArgs,
 	buildRtmpUrl,
@@ -24,6 +27,7 @@ import {
 	type EncoderProfile,
 } from "./egress";
 import { augmentedProcessEnv } from "./ffmpeg-env";
+import { transcodeWebmFileToMp4 } from "./recording-transcode";
 import {
 	buildWorkspaceLaunchPlans,
 	listWorkspaceApps,
@@ -100,7 +104,10 @@ interface EgressState {
 let egress: EgressState | null = null;
 let egressStats: EgressStats = {};
 let recordingWriter: Awaited<ReturnType<typeof open>> | null = null;
-let recordingPath = "";
+/** Temp file accumulating WebM chunks from the renderer. */
+let recordingStagingPath = "";
+/** User-chosen final path (`.mp4`) after ffmpeg transcode. */
+let recordingOutputPath = "";
 
 // --- Hardware encoder detection ---
 //
@@ -656,13 +663,14 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 			},
 
 			startRecordingFile: async ({ suggestedName }) => {
+				let staging = "";
 				try {
 					if (recordingWriter) {
 						return { success: false, error: "Recording already in progress" };
 					}
 					const chosenPaths = await Utils.openFileDialog({
 						startingFolder: Bun.env["HOME"] || "/",
-						allowedFileTypes: "webm",
+						allowedFileTypes: "mp4",
 						canChooseFiles: false,
 						canChooseDirectory: true,
 						allowsMultipleSelection: false,
@@ -670,13 +678,21 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 					if (!chosenPaths[0] || chosenPaths[0] === "") {
 						return { success: false, reason: "canceled" };
 					}
-					const savePath = `${chosenPaths[0]}/${suggestedName}`;
-					recordingWriter = await open(savePath, "w");
-					recordingPath = savePath;
+					const base = suggestedName.trim();
+					const mp4Name = base.toLowerCase().endsWith(".mp4")
+						? base
+						: `${base.replace(/\.webm$/i, "").replace(/\.mp4$/i, "")}.mp4`;
+					const savePath = `${chosenPaths[0]}/${mp4Name}`;
+					staging = join(tmpdir(), `weclank-rec-${randomUUID()}.webm`);
+					recordingWriter = await open(staging, "w");
+					recordingStagingPath = staging;
+					recordingOutputPath = savePath;
 					return { success: true, path: savePath };
 				} catch (error) {
 					recordingWriter = null;
-					recordingPath = "";
+					recordingStagingPath = "";
+					recordingOutputPath = "";
+					if (staging) await unlink(staging).catch(() => {});
 					return { success: false, error: (error as Error).message };
 				}
 			},
@@ -699,14 +715,21 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 					return { success: false, reason: "canceled" };
 				}
 				const writer = recordingWriter;
-				const path = recordingPath;
+				const staging = recordingStagingPath;
+				const output = recordingOutputPath;
 				recordingWriter = null;
-				recordingPath = "";
+				recordingStagingPath = "";
+				recordingOutputPath = "";
 				try {
 					await writer.close();
-					return { success: true, path };
+					await transcodeWebmFileToMp4(staging, output);
+					await unlink(staging).catch(() => {});
+					return { success: true, path: output };
 				} catch (error) {
-					return { success: false, error: (error as Error).message };
+					return {
+						success: false,
+						error: `${(error as Error).message}${staging ? ` (staging WebM kept at ${staging})` : ""}`,
+					};
 				}
 			},
 
@@ -1321,13 +1344,21 @@ function createUtilityWindow(
 	utilityWindows.set(kind, win);
 
 	win.webview.on("dom-ready", () => {
-		win.webview.rpc?.send.initializeUtilityWindow({ id: win.id, kind });
-		mainWindow.webview.rpc?.send.utilityWindowReady({ id: win.id, kind });
+		try {
+			win.webview.rpc?.send.initializeUtilityWindow({ id: win.id, kind });
+			mainWindow?.webview?.rpc?.send?.utilityWindowReady({ id: win.id, kind });
+		} catch (err) {
+			console.warn("[utility] dom-ready notify failed", err);
+		}
 	});
 
 	win.on("close", () => {
-		utilityWindows.delete(kind);
-		mainWindow.webview.rpc?.send.utilityWindowClosed({ id: win.id, kind });
+		try {
+			utilityWindows.delete(kind);
+			mainWindow?.webview?.rpc?.send?.utilityWindowClosed({ id: win.id, kind });
+		} catch (err) {
+			console.warn("[utility] close notify failed", err);
+		}
 	});
 
 	return win;
@@ -1538,6 +1569,7 @@ function isNativeMenuAction(action: string): action is NativeMenuAction {
 }
 
 function handleNativeMenuAction(action: NativeMenuAction): void {
+	const wv = mainWindow?.webview;
 	switch (action) {
 		case "main.show":
 			mainWindow.show();
@@ -1547,31 +1579,31 @@ function handleNativeMenuAction(action: NativeMenuAction): void {
 			mainWindow.hide();
 			break;
 		case "main.reload":
-			mainWindow.webview.loadURL("views://mainview/index.html");
+			wv?.loadURL("views://mainview/index.html");
 			break;
 		case "main.devtools":
-			mainWindow.webview.toggleDevTools();
+			wv?.toggleDevTools();
 			break;
 		case "settings.open":
 			mainWindow.show();
 			mainWindow.activate();
-			mainWindow.webview.rpc?.send.nativeOpenSettings({});
+			wv?.rpc?.send?.nativeOpenSettings({});
 			break;
 		case "help.open":
 			mainWindow.show();
 			mainWindow.activate();
-			mainWindow.webview.rpc?.send.nativeOpenHelp({});
+			wv?.rpc?.send?.nativeOpenHelp({});
 			break;
 		case "rtmp.open":
 			mainWindow.show();
 			mainWindow.activate();
-			mainWindow.webview.rpc?.send.nativeOpenRtmp({});
+			wv?.rpc?.send?.nativeOpenRtmp({});
 			break;
 		case "recording.toggle":
-			mainWindow.webview.rpc?.send.nativeToggleRecording({});
+			wv?.rpc?.send?.nativeToggleRecording({});
 			break;
 		case "stream.toggle":
-			mainWindow.webview.rpc?.send.nativeToggleLive({});
+			wv?.rpc?.send?.nativeToggleLive({});
 			break;
 		case "window.studio":
 			openUtilityWindow("studio", { clickThrough: false, alwaysOnTop: false });

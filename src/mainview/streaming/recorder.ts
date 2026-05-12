@@ -1,7 +1,7 @@
-// Local recorder — captures the broadcast stream to a WebM file via the
-// same MediaRecorder pipeline that feeds the RTMP egress, but instead of
-// shipping chunks to ffmpeg's stdin we accumulate the Blob and save it
-// once stopped (or periodically, for crash-survival).
+// Local recorder — MediaRecorder encodes VP8/9 + Opus into WebM (same
+// pipeline as RTMP egress). Chunks are streamed to a temp WebM in the
+// system temp directory; on stop, Bun runs ffmpeg to transcode to H.264+AAC
+// MP4 at the path you pick (+faststart for quick playback start).
 //
 // Independent of egress: you can record without streaming, stream
 // without recording, or both at once. The recorder uses the same preset
@@ -17,8 +17,11 @@ import { startBroadcastCapture, type BroadcastCaptureSession } from "./capture";
 
 class LocalRecorder {
 	private capture: BroadcastCaptureSession | null = null;
-	private busy = false;
 	private startedAt = 0;
+	/** Serializes chunk writes so the last `dataavailable` blob finishes
+	 * before `finishRecordingFile` closes the handle (MediaRecorder does
+	 * not await `onChunk`). */
+	private writeChain: Promise<void> = Promise.resolve();
 
 	get isRecording(): boolean {
 		return this.capture !== null && this.capture.recorder.state !== "inactive";
@@ -34,7 +37,7 @@ class LocalRecorder {
 		}
 
 		const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-		const result = await bunRpc.startRecordingFile({ suggestedName: `weclank-${ts}.webm` });
+		const result = await bunRpc.startRecordingFile({ suggestedName: `weclank-${ts}.mp4` });
 		if (!result.success) {
 			if (result.reason === "canceled") return;
 			throw new IpcError(
@@ -43,12 +46,15 @@ class LocalRecorder {
 			);
 		}
 
+		this.writeChain = Promise.resolve();
 		this.startedAt = Date.now();
 		this.capture = startBroadcastCapture({
 			source: streamEngine,
 			quality: studio.state.stream.quality,
 			chunkIntervalMs: 5_000,
-			onChunk: (blob) => { void this.shipChunk(blob); },
+			onChunk: (blob) => {
+				this.writeChain = this.writeChain.then(() => this.shipChunk(blob));
+			},
 			onError: (event) => {
 				console.error("[recorder] error", event);
 				toast("Recording error — see console", "error");
@@ -78,22 +84,16 @@ class LocalRecorder {
 	}
 
 	private async shipChunk(blob: Blob): Promise<void> {
-		while (this.busy) await new Promise((r) => setTimeout(r, 5));
-		this.busy = true;
-		try {
-			const buffer = await blob.arrayBuffer();
-			const base64 = arrayBufferToBase64(buffer);
-			const result = await bunRpc.writeRecordingChunk({ base64 });
-			if (!result.ok) {
-				console.warn("[recorder] chunk rejected", result.error);
-			}
-		} finally {
-			this.busy = false;
+		const buffer = await blob.arrayBuffer();
+		const base64 = arrayBufferToBase64(buffer);
+		const result = await bunRpc.writeRecordingChunk({ base64 });
+		if (!result.ok) {
+			console.warn("[recorder] chunk rejected", result.error);
 		}
 	}
 
 	private async flushChunks(): Promise<void> {
-		while (this.busy) await new Promise((r) => setTimeout(r, 5));
+		await this.writeChain;
 	}
 }
 
