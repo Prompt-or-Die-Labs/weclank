@@ -147,7 +147,7 @@ function renderSettings(): string {
 		<section class="settings-section">
 			<div class="settings-section__head">
 				<h3>Recording & Capture</h3>
-				<p>REC records the composed program canvas. Add a screen source first when you want the IDE or terminal in the recording.</p>
+				<p>REC writes the same composited program as RTMP: every visible scene tile (camera, <strong>screen share</strong>, agents, etc.) plus broadcast overlays and the mixed program audio. Put a screen source in the active scene layout so the capture shows your desktop or a window. Screen capture uses <code>getDisplayMedia</code> (video only from the share — tab or system sound from the picker is not mixed unless you route it through a mic device).</p>
 			</div>
 			<div class="settings-grid settings-grid--two">
 				<button type="button" class="settings-action" data-action="screen">Add screen capture</button>
