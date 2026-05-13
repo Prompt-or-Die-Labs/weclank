@@ -10,7 +10,7 @@ import { join } from "node:path";
 const tag = process.argv[2];
 const suffix = process.argv[3];
 if (!tag || !suffix) {
-	console.error("usage: package-build-artifact.ts <tag e.g. v0.1.0> <suffix e.g. macos-arm64>");
+	console.error("usage: package-build-artifact.ts <tag e.g. v0.3.0> <suffix e.g. macos-arm64>");
 	process.exit(1);
 }
 

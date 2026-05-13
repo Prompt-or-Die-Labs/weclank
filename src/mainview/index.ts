@@ -1,4 +1,4 @@
-// Studio Live entrypoint. Loads RPC, gates on auth, hydrates per-user
+// Weclank entrypoint. Loads RPC, gates on auth, hydrates per-user
 // state, then mounts the studio shell or a utility window.
 
 import "./rpc";

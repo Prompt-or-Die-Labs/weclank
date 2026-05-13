@@ -17,18 +17,39 @@ import { toast } from "../components/overlays";
 import { arrayBufferToBase64 } from "./base64";
 import { startBroadcastCapture, type BroadcastCaptureSession } from "./capture";
 
+const RECORDER_STOP_TIMEOUT_MS = 45_000;
+
+interface RecorderSession {
+	capture: BroadcastCaptureSession;
+	writeChain: Promise<void>;
+	chunkError: Error | null;
+	acceptingChunks: boolean;
+}
+
+function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+	return new Promise((resolve, reject) => {
+		const id = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+		p.then(
+			(value) => {
+				clearTimeout(id);
+				resolve(value);
+			},
+			(error) => {
+				clearTimeout(id);
+				reject(error);
+			},
+		);
+	});
+}
+
 class LocalRecorder {
-	private capture: BroadcastCaptureSession | null = null;
+	private session: RecorderSession | null = null;
 	private finalizing = false;
 	private starting = false;
 	private startedAt = 0;
-	/** Serializes chunk writes so the last `dataavailable` blob finishes
-	 * before `finishRecordingFile` closes the handle (MediaRecorder does
-	 * not await `onChunk`). */
-	private writeChain: Promise<void> = Promise.resolve();
 
 	get isRecording(): boolean {
-		return this.capture !== null;
+		return this.session !== null;
 	}
 
 	get elapsedMs(): number {
@@ -36,7 +57,7 @@ class LocalRecorder {
 	}
 
 	async start(): Promise<void> {
-		if (this.capture || this.starting) {
+		if (this.session || this.starting) {
 			throw new AudioError("Recording already running", "Stop the current recording first.");
 		}
 		if (this.finalizing) {
@@ -63,20 +84,28 @@ class LocalRecorder {
 			}
 			diskSessionOpen = true;
 
-			this.writeChain = Promise.resolve();
+			let session: RecorderSession | null = null;
 			this.startedAt = Date.now();
-			this.capture = startBroadcastCapture({
+			const capture = startBroadcastCapture({
 				source: streamEngine,
 				quality: studio.state.stream.quality,
 				chunkIntervalMs: 5_000,
 				onChunk: (blob) => {
-					this.writeChain = this.writeChain.then(() => this.shipChunk(blob));
+					if (!session?.acceptingChunks) return;
+					const activeSession = session;
+					activeSession.writeChain = activeSession.writeChain
+						.then(() => this.shipChunk(blob))
+						.catch((err) => {
+							activeSession.chunkError = err instanceof Error ? err : new Error(String(err));
+						});
 				},
 				onError: (event) => {
 					console.error("[recorder] error", event);
 					toast("Recording error — see console", "error");
 				},
 			});
+			session = { capture, writeChain: Promise.resolve(), chunkError: null, acceptingChunks: true };
+			this.session = session;
 			studio.setStream({ recording: true });
 		} catch (err) {
 			if (diskSessionOpen) {
@@ -90,22 +119,29 @@ class LocalRecorder {
 
 	/** Stop is fire-and-forget. UI flips now; finalize runs in the background. */
 	stop(): void {
-		const capture = this.capture;
-		this.capture = null;
+		const session = this.session;
+		this.session = null;
 		studio.setStream({ recording: false });
-		if (!capture) return;
+		if (!session) return;
 
 		this.finalizing = true;
-		void this.finalize(capture).finally(() => {
-			this.finalizing = false;
-		});
+		void this.finalize(session)
+			.finally(() => {
+				this.finalizing = false;
+			})
+			.catch((err) => {
+				console.error("[recorder] finalize cleanup failed", err);
+				toast(`Save failed: ${userMessageFor(err)}`, "error");
+			});
 	}
 
-	private async finalize(capture: BroadcastCaptureSession): Promise<void> {
+	private async finalize(session: RecorderSession): Promise<void> {
 		let savedPath: string | null = null;
 		try {
-			await capture.stop();
-			await this.writeChain;
+			await promiseWithTimeout(session.capture.stop(), RECORDER_STOP_TIMEOUT_MS, "MediaRecorder stop");
+			session.acceptingChunks = false;
+			await session.writeChain;
+			if (session.chunkError) throw session.chunkError;
 			const result = await bunRpc.finishRecordingFile({});
 			if (result.success && result.path) {
 				savedPath = result.path;
@@ -121,6 +157,7 @@ class LocalRecorder {
 			toast(`Save failed: ${userMessageFor(err)}`, "error");
 			await bunRpc.cancelRecordingFile({}).catch(() => {});
 		} finally {
+			session.acceptingChunks = false;
 			if (savedPath) {
 				const { openRecordingReviewDialog } = await import("../components/recording-review-dialog");
 				openRecordingReviewDialog(savedPath);
@@ -133,7 +170,7 @@ class LocalRecorder {
 		const base64 = arrayBufferToBase64(buffer);
 		const result = await bunRpc.writeRecordingChunk({ base64 });
 		if (!result.ok) {
-			console.warn("[recorder] chunk rejected", result.error);
+			throw new IpcError(result.error ?? "unknown", `Couldn't write recording chunk: ${result.error ?? "no detail"}`);
 		}
 	}
 }

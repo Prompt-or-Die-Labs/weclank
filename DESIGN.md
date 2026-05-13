@@ -1,7 +1,7 @@
 ---
 version: alpha
-name: Studio Live — D350
-description: Mission-control / sage-orange visual identity for a local-first streaming studio with AI co-hosts.
+name: Weclank — D350
+description: Mission-control / sage-orange visual identity for an AI co-host for coding livestreams.
 colors:
   primary: "#1a1f1a"
   secondary: "#5a6058"
@@ -221,7 +221,7 @@ components:
 
 ## Overview
 
-Mission-control aesthetic for a live streaming studio. The visual reference
+Mission-control aesthetic for a coding livestream co-host. The visual reference
 is industrial telemetry software — Bloomberg Terminal density, Logic Pro
 control surfaces, Apollo-era console design — softened with a single warm
 sage backdrop and a focal orange accent.
@@ -360,7 +360,7 @@ how they compose:
   thinking → generating → speaking).
 - **`card-stat-focal`** — orange variant of the stat card. Reserved for
   the single "most important right now" stat. In the source reference
-  this is the next-launch-window card; in Studio Live it's the LIVE
+  this is the next-launch-window card; in Weclank it's the LIVE
   uptime cell when streaming.
 
 ## Do's and Don'ts

@@ -4,6 +4,7 @@
 
 import { openAuthDialog } from "../auth/auth-dialog";
 import type { UserId } from "../core/ids";
+import { PRODUCT_PROMISE, PRODUCT_TAGLINE, PRODUCT_VERSION } from "../product";
 
 export function mountSplash(): Promise<{ id: UserId; username: string }> {
 	return new Promise((resolve) => {
@@ -16,22 +17,22 @@ export function mountSplash(): Promise<{ id: UserId; username: string }> {
 		splash.innerHTML = `
 			<div class="splash__inner">
 				<div class="splash__brand">WE<span>/</span>CLANK</div>
-				<p class="splash__tagline">Open-source streaming studio with AI co-hosts. Local-first, single binary, your machine, your data.</p>
-				<p class="splash__badge">Desktop app · macOS / Linux / Windows · RTMP requires ffmpeg on your PATH</p>
+				<p class="splash__tagline">${PRODUCT_PROMISE}. ${PRODUCT_TAGLINE}</p>
+				<p class="splash__badge">Desktop app · macOS / Linux / Windows · streaming uses ffmpeg when you go live</p>
 				<div class="splash__cta">
 					<button class="primary" data-action="signin">Sign in</button>
 					<button class="secondary" data-action="signup">Create account</button>
 				</div>
 				<div class="splash__features">
-					<div>Multi-source compositing → hardware-encoded RTMP egress to one or many destinations.</div>
-					<div>AI co-host with streaming TTS, viewer-chat awareness, mic transcription, and tool-driven overlays.</div>
-					<div>Coding-feed integration so the agent reacts to what Claude Code or Codex is doing in real time.</div>
-					<div>Music generation (Suno), captions, QR codes, and stream overlays — all driven from inside the app.</div>
+					<div>Coding-feed awareness from Claude Code or Codex JSONL sessions.</div>
+					<div>Host mic and viewer-chat context for a co-host that knows what just happened.</div>
+					<div>Overlay cues, captions, music, and chat responses driven by the co-host loop.</div>
+					<div>Recording review and post-stream outputs so each stream creates the next session's memory.</div>
 				</div>
 			</div>
 			<div class="splash__footer">
-				<span>local-first · sqlite · apache 2.0</span>
-				<span>v0.1</span>
+				<span>local-first · keychain-backed secrets · apache 2.0</span>
+				<span>v${PRODUCT_VERSION}</span>
 			</div>
 		`;
 		root.appendChild(splash);

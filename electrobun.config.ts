@@ -1,10 +1,11 @@
 import type { ElectrobunConfig } from "electrobun";
+import { PRODUCT_VERSION } from "./src/mainview/product";
 
 export default {
 	app: {
 		name: "weclank",
 		identifier: "weclank.localfirst.dev",
-		version: "0.1.0",
+		version: PRODUCT_VERSION,
 	},
 	build: {
 		views: {

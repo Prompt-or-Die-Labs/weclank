@@ -7,6 +7,20 @@ import { randomUUID } from "node:crypto";
 
 const IMAGE_RE = /\.(png|jpe?g|gif|webp)$/i;
 
+function resolveMediaLibraryRoot(rootPath: string): { ok: true; root: string } | { ok: false; error: string } {
+	const trimmed = rootPath.trim();
+	if (!trimmed) return { ok: false, error: "Media library root is required" };
+	return { ok: true, root: resolve(trimmed) };
+}
+
+function errorMessage(e: unknown): string {
+	return e instanceof Error ? e.message : String(e);
+}
+
+function errorCode(e: unknown): string {
+	return typeof e === "object" && e !== null && "code" in e ? String(e.code) : "";
+}
+
 export function isImageFileName(name: string): boolean {
 	return IMAGE_RE.test(name);
 }
@@ -35,7 +49,9 @@ export async function saveMediaLibraryBytes(args: {
 	bytes: Uint8Array<ArrayBuffer> | Buffer;
 }): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
 	try {
-		const root = resolve(args.rootPath.trim());
+		const rootResult = resolveMediaLibraryRoot(args.rootPath);
+		if (!rootResult.ok) return rootResult;
+		const root = rootResult.root;
 		const cat = sanitizeMediaCategory(args.category);
 		const fn = safeMediaFileName(args.fileName);
 		if (!isImageFileName(fn)) {
@@ -47,7 +63,7 @@ export async function saveMediaLibraryBytes(args: {
 		await Bun.write(full, args.bytes);
 		return { ok: true, path: full };
 	} catch (e) {
-		return { ok: false, error: (e as Error).message };
+		return { ok: false, error: errorMessage(e) };
 	}
 }
 
@@ -58,7 +74,9 @@ export async function listMediaLibrary(args: {
 	categories: string[];
 }): Promise<{ ok: true; categories: MediaLibraryListCategory[] } | { ok: false; error: string }> {
 	try {
-		const root = resolve(args.rootPath.trim());
+		const rootResult = resolveMediaLibraryRoot(args.rootPath);
+		if (!rootResult.ok) return rootResult;
+		const root = rootResult.root;
 		const out: MediaLibraryListCategory[] = [];
 		const seen = new Set<string>();
 		for (const raw of args.categories) {
@@ -73,13 +91,17 @@ export async function listMediaLibrary(args: {
 					.map((d) => ({ name: d.name, path: join(dir, d.name) }))
 					.sort((a, b) => a.name.localeCompare(b.name));
 				out.push({ name: cat, files });
-			} catch {
-				out.push({ name: cat, files: [] });
+			} catch (e) {
+				if (errorCode(e) === "ENOENT") {
+					out.push({ name: cat, files: [] });
+					continue;
+				}
+				return { ok: false, error: errorMessage(e) };
 			}
 		}
 		return { ok: true, categories: out };
 	} catch (e) {
-		return { ok: false, error: (e as Error).message };
+		return { ok: false, error: errorMessage(e) };
 	}
 }
 
@@ -111,7 +133,9 @@ export async function importFilesToMediaLibrary(args: {
 	sourcePaths: string[];
 }): Promise<{ ok: true; copied: string[] } | { ok: false; error: string }> {
 	try {
-		const root = resolve(args.rootPath.trim());
+		const rootResult = resolveMediaLibraryRoot(args.rootPath);
+		if (!rootResult.ok) return rootResult;
+		const root = rootResult.root;
 		const cat = sanitizeMediaCategory(args.category);
 		const destDir = join(root, cat);
 		await mkdir(destDir, { recursive: true });
@@ -132,6 +156,6 @@ export async function importFilesToMediaLibrary(args: {
 		}
 		return { ok: true, copied };
 	} catch (e) {
-		return { ok: false, error: (e as Error).message };
+		return { ok: false, error: errorMessage(e) };
 	}
 }

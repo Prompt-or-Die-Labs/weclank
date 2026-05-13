@@ -1,5 +1,4 @@
-// First-run checklist: ffmpeg, RTMP destinations, host camera — plus
-// entry points to guided setup and settings.
+// First-run checklist: co-host loop first, broadcast dependencies second.
 
 import { Component } from "../core/component";
 import { participantId } from "../core/ids";
@@ -10,6 +9,7 @@ import { openSettingsDialog } from "./settings-dialog";
 import { openSetupWizard } from "./setup-wizard";
 import { ffmpegInstallHint } from "../platform";
 import { toast } from "./overlays";
+import type { StudioFocusMode } from "../core/types";
 
 const HOST_ID = participantId("host");
 const DISMISS_KEY = "weclank.setupStrip.dismissed";
@@ -22,7 +22,9 @@ interface State {
 	ffmpegProbePending: boolean;
 	rtmpCount: number;
 	hostCameraOff: boolean;
-	focusMode: "broadcast" | "full";
+	focusMode: StudioFocusMode;
+	agentCount: number;
+	transcriptEnabled: boolean;
 }
 
 export class SetupChecklistStrip extends Component<State> {
@@ -34,12 +36,16 @@ export class SetupChecklistStrip extends Component<State> {
 			ffmpegProbePending: true,
 			rtmpCount: getSavedRtmpDestinationCount(),
 			hostCameraOff: studio.state.participants[HOST_ID]?.cameraOff ?? true,
-			focusMode: studio.state.studioPrefs?.focusMode ?? "full",
+			focusMode: studio.state.studioPrefs?.focusMode ?? "cohost",
+			agentCount: countAgents(),
+			transcriptEnabled: studio.state.transcript?.enabled ?? false,
 		});
 		studio.select(
 			(s) => ({
 				hostCameraOff: s.participants[HOST_ID]?.cameraOff ?? true,
-				focusMode: s.studioPrefs?.focusMode ?? "full",
+				focusMode: s.studioPrefs?.focusMode ?? "cohost",
+				agentCount: Object.values(s.participants).filter((p) => p.isAgent).length,
+				transcriptEnabled: s.transcript?.enabled ?? false,
 			}),
 			(patch) => this.setState(patch),
 		);
@@ -59,6 +65,8 @@ export class SetupChecklistStrip extends Component<State> {
 					: "ffmpeg missing";
 		const rtmp = this.state.rtmpCount > 0 ? `${this.state.rtmpCount} RTMP destination(s)` : "No RTMP channels saved";
 		const cam = this.state.hostCameraOff ? "Host webcam off" : "Host webcam on";
+		const agents = this.state.agentCount > 0 ? `${this.state.agentCount} co-host${this.state.agentCount === 1 ? "" : "s"}` : "No co-host yet";
+		const transcript = this.state.transcriptEnabled ? "Coding feed on" : "Coding feed off";
 		const ffDetail = this.state.ffmpegOk === false ? `<span class="setup-strip__detail">${escapeHtmlPlain(this.state.ffmpegLine)}</span>` : "";
 		const ffCopy =
 			this.state.ffmpegOk === false
@@ -66,11 +74,13 @@ export class SetupChecklistStrip extends Component<State> {
 				: "";
 		const broadcastHint =
 			this.state.focusMode === "broadcast"
-				? `<span class="setup-strip__hint">Broadcast focus — connect OpenRouter from the account menu when you want AI co-hosts.</span>`
+				? `<span class="setup-strip__hint">Broadcast-only mode keeps co-host setup out of the first surface; switch focus in Settings.</span>`
 				: "";
 		return `
 			<div class="setup-strip__row" role="region" aria-label="Setup checklist" aria-busy="${this.state.ffmpegProbePending ? "true" : "false"}">
 				<span class="setup-strip__label">Setup</span>
+				<span class="setup-strip__chip ${this.state.agentCount > 0 ? "ok" : "warn"}">${escapeHtmlPlain(agents)}</span>
+				<span class="setup-strip__chip ${this.state.transcriptEnabled ? "ok" : "warn"}">${escapeHtmlPlain(transcript)}</span>
 				<span class="setup-strip__chip ${chipClass(this.state.ffmpegOk)}">${ff}</span>
 				${ffDetail}
 				${ffCopy}
@@ -156,6 +166,10 @@ function chipClass(ok: boolean | null): string {
 	if (ok === true) return "ok";
 	if (ok === false) return "bad";
 	return "";
+}
+
+function countAgents(): number {
+	return Object.values(studio.state.participants).filter((p) => p.isAgent).length;
 }
 
 function escapeHtmlPlain(s: string): string {

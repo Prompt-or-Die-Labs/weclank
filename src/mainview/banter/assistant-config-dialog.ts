@@ -2,7 +2,7 @@
 //
 // Presents a role picker (co-host, chat-monitor, producer, overlay-bot,
 // code-narrator, custom) each with a pre-canned system prompt tuned to the
-// Studio Live context. The user can switch roles to load a different preset,
+// Weclank context. The user can switch roles to load a different preset,
 // or pick "custom" to write their own. They can also override the LLM model
 // and Twitch channel.
 //

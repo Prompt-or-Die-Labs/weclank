@@ -1,7 +1,6 @@
 // RTMP destinations dialog. Supports MULTIPLE destinations — Twitch
 // + YouTube + a local mirror all from the same encode via ffmpeg's tee
-// muxer. The list is stored in the per-user SQLite secrets table rather
-// than localStorage.
+// muxer. The list is stored in local account secrets rather than localStorage.
 
 import { Modal } from "../components/overlays";
 import { studio } from "../state/studio-store";
@@ -114,7 +113,7 @@ export function pickRtmpDestination(options: { intent?: "go-live" | "settings" }
 				</select>
 				<small class="tts-config__hint">Hardware encoder auto-selected. Per-destination bitrate isn't separated — the tee muxer mirrors the same encode.</small>
 			</label>
-			<div class="tts-config__footer">Saved in your account's local SQLite. ffmpeg must be on PATH.</div>
+			<div class="tts-config__footer">Saved to account secrets. macOS uses Keychain when available; streaming still needs ffmpeg on PATH.</div>
 			<div class="tts-config__actions">
 				<button type="button" data-action="cancel">Cancel</button>
 				<button type="button" data-action="save" class="primary">${options.intent === "settings" ? "Save destinations" : "Go live"}</button>

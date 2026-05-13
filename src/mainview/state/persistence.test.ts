@@ -31,7 +31,7 @@ function makeState(overrides: Partial<StudioState> = {}): StudioState {
 		streamOverlays: [],
 		music: { volume: 0.4, current: null },
 		focusedParticipantId: null,
-		studioPrefs: { focusMode: "full" },
+		studioPrefs: { focusMode: "cohost" },
 		...overrides,
 	};
 }

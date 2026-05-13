@@ -1,7 +1,7 @@
 // OpenAI platform API key — same shape as `OPENAI_API_KEY` for Codex CLI /
 // and the rest of the OpenAI HTTP API (Chat Completions, Images, Audio, etc.
-// — see https://platform.openai.com/docs/guides/images ). Stored in
-// `user_secrets` under key `openai`. In this app, `getSecret("openai")` is
+// — see https://platform.openai.com/docs/guides/images ). Saved under key
+// `openai`. In this app, `getSecret("openai")` is
 // read for banter LLM when `BanterConfig.llmProvider === "openai"`; other
 // features may extend use of the same credential later.
 
@@ -11,7 +11,7 @@ import { userMessageFor } from "../core/errors";
 
 export const OPENAI_API_KEY = "openai";
 
-/** Modal: paste `sk-…` key, save to SQLite + secrets cache. */
+/** Modal: paste `sk-…` key, save to local secrets + cache. */
 export async function openOpenAiApiKeyDialog(): Promise<void> {
 	return new Promise((resolve) => {
 		const body = document.createElement("div");
@@ -22,7 +22,7 @@ export async function openOpenAiApiKeyDialog(): Promise<void> {
 				<span>API key</span>
 				<input type="password" data-field="key" autocomplete="off" spellcheck="false" placeholder="sk-…" />
 			</label>
-			<p class="tts-config__hint">Stored in your local SQLite account file (plaintext). Mic transcription still uses OpenRouter unless you change that separately.</p>
+			<p class="tts-config__hint">Saved to the macOS Keychain when available; other platforms use the local SQLite account file. Mic transcription still uses OpenRouter unless you change that separately.</p>
 			<div class="tts-config__actions">
 				<button type="button" data-action="cancel">Cancel</button>
 				<button type="button" data-action="save" class="primary">Save</button>

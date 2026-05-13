@@ -6,6 +6,7 @@
 // dialog can rely on the server doing the check.
 
 import { openDb } from "./schema";
+import { deleteAllSecretsForUser } from "./state";
 
 const USERNAME_REGEX = /^[a-zA-Z0-9_-]{3,32}$/;
 
@@ -56,6 +57,7 @@ export async function checkUser(username: string): Promise<{ exists: boolean }> 
 }
 
 export async function deleteAccount(userId: string): Promise<{ success: boolean }> {
+	await deleteAllSecretsForUser(userId);
 	const db = await openDb();
 	const result = db.run("DELETE FROM users WHERE id = ?", [userId]);
 	return { success: result.changes > 0 };

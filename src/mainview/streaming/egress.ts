@@ -23,11 +23,13 @@ export interface EgressTarget {
 
 class EgressController {
 	private capture: BroadcastCaptureSession | null = null;
-	private busy = false;
+	private writeChain: Promise<void> = Promise.resolve();
+	private shutdownInFlight: Promise<void> | null = null;
 
 	/** Accepts one OR many destinations. With multiple, Bun's ffmpeg
 	 * `tee` muxer fans the same encode out to all of them. */
 	async start(targets: EgressTarget | EgressTarget[]): Promise<void> {
+		if (this.shutdownInFlight) await this.shutdownInFlight;
 		if (this.capture) throw new StudioError("Egress already started", "Stop the current stream before starting a new one.");
 
 		const destinations = Array.isArray(targets) ? targets : [targets];
@@ -41,11 +43,16 @@ class EgressController {
 		}
 
 		try {
+			this.writeChain = Promise.resolve();
 			this.capture = startBroadcastCapture({
 				source: streamEngine,
 				quality: studio.state.stream.quality,
 				chunkIntervalMs: CHUNK_INTERVAL_MS,
-				onChunk: (blob) => { void this.shipChunk(blob); },
+				onChunk: (blob) => {
+					this.writeChain = this.writeChain
+						.then(() => this.shipChunk(blob))
+						.catch((err) => console.warn("[egress] chunk push failed", err));
+				},
 				onError: (event) => {
 					console.error("[egress] recorder error", event);
 				},
@@ -61,16 +68,20 @@ class EgressController {
 		const capture = this.capture;
 		this.capture = null;
 		studio.setStream({ live: false });
-		void this.shutdown(capture);
+		if (!capture) return;
+		const shutdown = this.shutdown(capture).finally(() => {
+			if (this.shutdownInFlight === shutdown) this.shutdownInFlight = null;
+		});
+		this.shutdownInFlight = shutdown;
+		void shutdown;
 	}
 
-	private async shutdown(capture: BroadcastCaptureSession | null): Promise<void> {
-		if (capture) {
-			try {
-				await capture.stop();
-			} catch (err) {
-				console.warn("[egress] recorder stop failed", err);
-			}
+	private async shutdown(capture: BroadcastCaptureSession): Promise<void> {
+		try {
+			await capture.stop();
+			await this.writeChain;
+		} catch (err) {
+			console.warn("[egress] recorder stop failed", err);
 		}
 		try {
 			await bunRpc.stopStreamEgress({});
@@ -80,17 +91,11 @@ class EgressController {
 	}
 
 	private async shipChunk(blob: Blob): Promise<void> {
-		while (this.busy) await new Promise((r) => setTimeout(r, 5));
-		this.busy = true;
-		try {
-			const buffer = await blob.arrayBuffer();
-			const base64 = arrayBufferToBase64(buffer);
-			const result = await bunRpc.pushStreamChunk({ base64 });
-			if (!result.ok) {
-				console.warn("[egress] chunk rejected", result.error);
-			}
-		} finally {
-			this.busy = false;
+		const buffer = await blob.arrayBuffer();
+		const base64 = arrayBufferToBase64(buffer);
+		const result = await bunRpc.pushStreamChunk({ base64 });
+		if (!result.ok) {
+			console.warn("[egress] chunk rejected", result.error);
 		}
 	}
 }

@@ -11,7 +11,7 @@ import { OpenAiSpeechTTSProvider } from "./openai-speech-tts";
 import type { TTSConfig, TTSProviderId } from "../core/types";
 import { getSecret, setSecretAndPersist } from "../auth/secrets-cache";
 
-// API keys live in the per-user secrets cache (hydrated from SQLite at
+// API keys live in the per-user secrets cache (hydrated from local storage at
 // login). Readers stay synchronous so existing TTS providers don't have
 // to thread `await` through every call site; writes persist via RPC.
 

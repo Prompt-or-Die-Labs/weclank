@@ -1,17 +1,8 @@
-// Right sidebar — replaces the 92px tool-rail. Seven tabs:
-//   Chat     (Twitch chat + click-to-overlay)
-//   Banters  (stream-overlay manager)
-//   Agents   (AI co-host status + tool-call log + speak)
-//   Media    (image / browser sources)
-//   Music    (now playing + volume + Suno generate)
-//   Notes    (Codex/Claude Code transcript watcher)
-//   Outputs  (post-stream recap, clips, questions, reports)
-//
-// Chat and Agents are inline implementations (the product-distinguishing
-// surfaces). The other four open existing dialogs for now and will be
-// inlined in follow-up polish.
+// Right sidebar — the coding co-host loop stays visible first. Broadcast-only
+// mode hides optional broadcast toys until the user asks for the full studio.
 
 import { Component } from "../core/component";
+import { studio } from "../state/studio-store";
 import { ChatTab } from "./tabs/chat-tab";
 import { AgentsTab } from "./tabs/agents-tab";
 import { BantersTab } from "./tabs/banters-tab";
@@ -19,23 +10,28 @@ import { MediaTab } from "./tabs/media-tab";
 import { MusicTab } from "./tabs/music-tab";
 import { NotesTab } from "./tabs/notes-tab";
 import { OutputsTab } from "./tabs/outputs-tab";
+import type { StudioFocusMode } from "../core/types";
 
 type TabId = "chat" | "banters" | "agents" | "media" | "music" | "notes" | "outputs";
 
 const TABS: { id: TabId; label: string }[] = [
-	{ id: "chat",    label: "Chat" },
-	{ id: "banters", label: "Banters" },
 	{ id: "agents",  label: "Agents" },
-	{ id: "media",   label: "Media" },
-	{ id: "music",   label: "Music" },
+	{ id: "chat",    label: "Chat" },
 	{ id: "notes",   label: "Notes" },
 	{ id: "outputs", label: "Outputs" },
+	{ id: "banters", label: "Banters" },
+	{ id: "media",   label: "Media" },
+	{ id: "music",   label: "Music" },
 ];
+
+const COHOST_TABS = new Set<TabId>(["agents", "chat", "notes", "outputs"]);
+const BROADCAST_TABS = new Set<TabId>(["chat", "outputs"]);
 
 const STORAGE_KEY = "studio.rightSidebar.activeTab";
 
 interface State {
 	active: TabId;
+	focusMode: StudioFocusMode;
 }
 
 export class RightSidebar extends Component<State> {
@@ -43,8 +39,20 @@ export class RightSidebar extends Component<State> {
 
 	constructor() {
 		const stored = (typeof localStorage !== "undefined" && localStorage.getItem(STORAGE_KEY)) as TabId | null;
-		const initial: TabId = stored && TABS.some((t) => t.id === stored) ? stored : "chat";
-		super({ active: initial });
+		const focusMode = studio.state.studioPrefs?.focusMode ?? "cohost";
+		const tabs = tabsForFocus(focusMode);
+		const initial: TabId = stored && tabs.some((t) => t.id === stored) ? stored : defaultTabForFocus(focusMode);
+		super({ active: initial, focusMode });
+		studio.select(
+			(s) => s.studioPrefs?.focusMode ?? "cohost",
+			(nextFocusMode) => {
+				const nextTabs = tabsForFocus(nextFocusMode);
+				this.setState({
+					focusMode: nextFocusMode,
+					active: nextTabs.some((t) => t.id === this.state.active) ? this.state.active : defaultTabForFocus(nextFocusMode),
+				});
+			},
+		);
 	}
 
 	protected rootClass(): string {
@@ -52,9 +60,10 @@ export class RightSidebar extends Component<State> {
 	}
 
 	protected template(): string {
+		const tabs = tabsForFocus(this.state.focusMode);
 		return `
 			<nav class="right-sidebar__tabs" role="tablist" aria-label="Studio tools">
-				${TABS.map((t) => `
+				${tabs.map((t) => `
 					<button id="right-sidebar-tab-${t.id}" class="right-sidebar__tab${t.id === this.state.active ? " is-active" : ""}" role="tab" aria-selected="${t.id === this.state.active}" aria-controls="right-sidebar-panel" tabindex="${t.id === this.state.active ? "0" : "-1"}" data-tab="${t.id}">${t.label}</button>
 				`).join("")}
 			</nav>
@@ -101,18 +110,29 @@ export class RightSidebar extends Component<State> {
 	}
 
 	private onTabKey(e: KeyboardEvent, id: TabId): void {
-		const index = TABS.findIndex((tab) => tab.id === id);
-		const next = (offset: number): TabId => TABS[(index + offset + TABS.length) % TABS.length]!.id;
+		const tabs = tabsForFocus(this.state.focusMode);
+		const index = tabs.findIndex((tab) => tab.id === id);
+		const next = (offset: number): TabId => tabs[(index + offset + tabs.length) % tabs.length]!.id;
 		let target: TabId | null = null;
 		if (e.key === "ArrowRight") target = next(1);
 		else if (e.key === "ArrowLeft") target = next(-1);
-		else if (e.key === "Home") target = TABS[0]!.id;
-		else if (e.key === "End") target = TABS[TABS.length - 1]!.id;
+		else if (e.key === "Home") target = tabs[0]!.id;
+		else if (e.key === "End") target = tabs[tabs.length - 1]!.id;
 		if (!target) return;
 		e.preventDefault();
 		this.activateTab(target);
 		requestAnimationFrame(() => this.$<HTMLButtonElement>(`[data-tab="${target}"]`)?.focus());
 	}
+}
+
+function tabsForFocus(focusMode: StudioFocusMode): typeof TABS {
+	if (focusMode === "cohost") return TABS.filter((tab) => COHOST_TABS.has(tab.id));
+	if (focusMode === "broadcast") return TABS.filter((tab) => BROADCAST_TABS.has(tab.id));
+	return TABS;
+}
+
+function defaultTabForFocus(focusMode: StudioFocusMode): TabId {
+	return focusMode === "broadcast" ? "chat" : "agents";
 }
 
 function makeTab(id: TabId): Component<unknown> {

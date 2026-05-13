@@ -6,7 +6,7 @@
 //      through Bun.spawn, which works in the Electrobun main process via RPC).
 //   3. Wait for Bun to capture the redirect code, then POST to OpenRouter's
 //      token endpoint to exchange it for a user API key.
-//   4. Persist the key in user_secrets under the canonical key "openrouter".
+//   4. Persist the key under the canonical key "openrouter".
 //
 // Returns the acquired key on success, throws on any failure.
 
@@ -62,4 +62,3 @@ export async function connectOpenRouterOAuth(): Promise<string> {
 
 	return json.key;
 }
-

@@ -8,6 +8,7 @@ import { studio } from "../state/studio-store";
 import { localRecorder } from "../streaming/recorder";
 import { getSavedRtmpDestinationCount, pickRtmpDestination } from "../streaming/rtmp-config-dialog";
 import { bunRpc } from "../rpc";
+import { PRODUCT_PROMISE, PRODUCT_TAGLINE } from "../product";
 import { getTheme, setTheme, type ThemeMode } from "./theme";
 import { Modal, toast } from "./overlays";
 import { escapeAttr, escapeHtml } from "./primitives";
@@ -100,7 +101,7 @@ function renderSettings(): string {
 	const quality = studio.state.stream.quality;
 	const openRouterConnected = hasSecret(OPENROUTER_KEY);
 	const openAiKeySaved = hasSecret(OPENAI_API_KEY);
-	const focusMode = studio.state.studioPrefs?.focusMode ?? "full";
+	const focusMode = studio.state.studioPrefs?.focusMode ?? "cohost";
 	const workspaceApps = [
 		["windsurf", "Windsurf"],
 		["antigravity", "Antigravity"],
@@ -158,7 +159,7 @@ function renderSettings(): string {
 		<section class="settings-section">
 			<div class="settings-section__head">
 				<h3>AI Chat & Agents</h3>
-				<p>OpenRouter is ${openRouterConnected ? "connected" : "not connected"} (TTS, speech-to-text, default banter LLM). OpenAI API key is ${openAiKeySaved ? "saved" : "not set"} — optional; use it when an agent's banter LLM provider is OpenAI.</p>
+				<p>${PRODUCT_PROMISE}: ${PRODUCT_TAGLINE} OpenRouter is ${openRouterConnected ? "connected" : "not connected"} (TTS, speech-to-text, default banter LLM). OpenAI API key is ${openAiKeySaved ? "saved" : "not set"}.</p>
 			</div>
 			<div class="settings-grid settings-grid--two">
 				<button type="button" class="settings-action" data-action="openrouter">Connect OpenRouter</button>
@@ -173,12 +174,16 @@ function renderSettings(): string {
 		<section class="settings-section">
 			<div class="settings-section__head">
 				<h3>Studio focus</h3>
-				<p>Broadcast-first hides optional AI nudges until you connect keys. Full studio surfaces agents, music, and transcript tools immediately.</p>
+				<p>Co-host first keeps the coding loop visible. Broadcast-only trims AI setup. Full studio exposes every tool tab.</p>
 			</div>
-			<div class="settings-grid settings-grid--two">
+			<div class="settings-grid settings-grid--three">
+				<label class="settings-choice">
+					<input type="radio" name="focusMode" value="cohost"${focusMode === "cohost" ? " checked" : ""} />
+					<span>Co-host first</span>
+				</label>
 				<label class="settings-choice">
 					<input type="radio" name="focusMode" value="broadcast"${focusMode === "broadcast" ? " checked" : ""} />
-					<span>Go live first</span>
+					<span>Broadcast-only</span>
 				</label>
 				<label class="settings-choice">
 					<input type="radio" name="focusMode" value="full"${focusMode === "full" ? " checked" : ""} />
@@ -201,14 +206,14 @@ function renderSettings(): string {
 		<section class="settings-section">
 			<div class="settings-section__head">
 				<h3>Privacy & local data</h3>
-				<p>API keys and RTMP stream keys are stored in plaintext inside your account's SQLite file on this computer — the same threat model as your shell history. Full-disk encryption (FileVault, BitLocker, LUKS) is the practical mitigation. Passwords are hashed with argon2id; there is no cloud password reset.</p>
+				<p>API keys and RTMP stream keys use the macOS Keychain when available. On Linux and Windows they stay in your local SQLite account file; legacy plaintext rows continue to load until re-saved. Passwords are hashed with argon2id; there is no cloud password reset.</p>
 			</div>
 		</section>
 
 		<section class="settings-section">
 			<div class="settings-section__head">
-				<h3>Product scope (MVP)</h3>
-				<p>Weclank is a local-first compositor with RTMP egress and AI tooling — not a full OBS plugin ecosystem yet. There is no NDI ingest, no cloud sync, and advanced audio routing is intentionally minimal compared to dedicated broadcast suites.</p>
+				<h3>Product scope</h3>
+				<p>Weclank is for coding livestreams: transcript awareness, host mic context, chat response, overlay cueing, recording review, and post-stream output. It is not trying to be a broad OBS plugin ecosystem.</p>
 			</div>
 		</section>
 

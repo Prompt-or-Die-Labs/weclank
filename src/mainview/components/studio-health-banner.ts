@@ -60,7 +60,7 @@ export class StudioHealthBanner extends Component<State> {
 		this.syncNudge();
 		this.track(
 			studio.select(
-				(s) => `${s.studioPrefs?.focusMode ?? "full"}:${countAgents(s)}`,
+				(s) => `${s.studioPrefs?.focusMode ?? "cohost"}:${countAgents(s)}`,
 				() => this.syncNudge(),
 			),
 		);
@@ -73,10 +73,10 @@ export class StudioHealthBanner extends Component<State> {
 		} catch {
 			dismissed = false;
 		}
-		const broadcast = studio.state.studioPrefs?.focusMode === "broadcast";
+		const cohostSurface = (studio.state.studioPrefs?.focusMode ?? "cohost") !== "broadcast";
 		const connected = hasSecret(OPENROUTER_KEY) || hasSecret(OPENAI_API_KEY);
 		const agents = countAgents(studio.state);
-		const show = !dismissed && broadcast && !connected && agents > 0;
+		const show = !dismissed && cohostSurface && !connected && agents > 0;
 		this.setState({ showOpenRouterNudge: show });
 	}
 

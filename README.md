@@ -1,22 +1,19 @@
 # Weclank
 
-Open-source local-first streaming studio with AI co-hosts.
+AI co-host for coding livestreams.
 
-One binary. No cloud. Your machine, your data — every account, scene, agent, and API key lives in a SQLite file on your disk.
+One binary. No cloud project. Your machine, your data — accounts, scenes, agents, transcripts, and stream state stay local. Secrets use macOS Keychain when available and local SQLite elsewhere.
 
 ## What it does
 
-- **Multi-source compositing** — webcams, screens, mics, AI participants. Drag-reorder scenes, pick layouts, RTMP egress with hardware encoding (videotoolbox / nvenc / vaapi / qsv auto-detected).
-- **Multistream** — fan a single encode to Twitch + YouTube + a local mirror via ffmpeg's `tee` muxer. One CPU cost, many platforms.
-- **AI co-host** — a banter agent that:
-  - reads viewer chat (anonymous Twitch IRC) and replies via streaming TTS (ElevenLabs / OpenRouter / Suno),
-  - listens to your microphone (OpenRouter audio transcription) so it knows what you just said,
-  - tails your Claude Code or Codex JSONL session so it reacts to actual coding work,
-  - drives stream overlays + music + captions via OpenAI-style tool calling,
-  - pauses when you speak (VAD gate),
-  - speaks unprompted when chat is quiet but your AI coder is working.
-- **Visual broadcast layer** — title cards, lower-thirds, code snippets, notice toasts, chat overlay, live captions, QR codes — all rendered onto the broadcast canvas (not the local preview).
-- **Per-user accounts** — argon2id passwords, per-user secrets + state in SQLite. Sign in / out / delete-account flows. Local-only, no remote.
+- **Coding-aware co-host** — tails Claude Code or Codex JSONL sessions so the agent can react to tool calls, edits, and terminal work instead of riffing from generic chat.
+- **Host + chat context** — reads viewer chat, listens to your mic when enabled, pauses while you speak, and replies through text or streaming TTS.
+- **Overlay cueing** — lets the co-host drive title cards, lower-thirds, code snippets, notice toasts, captions, QR codes, and music from the same tool loop.
+- **Post-stream habit loop** — records the program feed, opens review, and drafts recap assets from run-of-show, transcript feed, chat, and co-host actions.
+- **Broadcast path when needed** — webcams, screens, mics, scenes, hardware-encoded RTMP egress, and multistream fan-out via ffmpeg's `tee` muxer.
+- **Local accounts** — argon2id passwords, per-user state, local-only sign in/out/delete-account flows.
+
+Weclank is not trying to be a general OBS replacement. The product bet is the coding-stream co-host loop: transcript awareness, host mic context, chat response, overlay cueing, recording review, and post-stream output.
 
 ## Install
 
@@ -52,11 +49,13 @@ The file is mode 0600 (user-only). It's plain SQLite — back it up, copy it to 
 
 ## Configure
 
-API keys live in your account's `user_secrets` table — set them in-app:
+Set provider keys in-app:
 
-- **OpenRouter** — required for the banter agent (LLM + audio transcription). Default model `openrouter/free` auto-routes to free tool-capable models. Sign up at [openrouter.ai/keys](https://openrouter.ai/keys).
+- **OpenRouter** — default banter LLM, TTS, and audio transcription. Default model `openrouter/free` auto-routes to free tool-capable models. Sign up at [openrouter.ai/keys](https://openrouter.ai/keys).
 - **ElevenLabs** — optional, for streaming TTS with sub-200ms latency. Sign up at [elevenlabs.io](https://elevenlabs.io).
 - **Suno** — optional, for AI music generation. Uses [api.sunoapi.org](https://docs.sunoapi.org) by default.
+
+On macOS, new secrets are stored in Keychain and referenced from SQLite. On Linux and Windows, secrets are stored in the local SQLite account file for now. Legacy plaintext SQLite rows still load so older accounts keep working after upgrade.
 
 For coding-feed context, point the Coding panel at your active Claude Code / Codex JSONL session — or hit "Auto-detect newest session" to find it.
 
@@ -67,7 +66,7 @@ For multistream, the RTMP dialog (right of the Go Live button) lets you add mult
 
 ## Architecture (one paragraph)
 
-Electrobun desktop app — Bun runs the main process (SQLite, ffmpeg, file dialogs, transcript tail); a single webview renders the studio (state store, components, renderers, mixers). Typed RPC between them. See `CLAUDE.md` for the full subsystem map.
+Electrobun desktop app — Bun runs the main process (SQLite, Keychain bridge, ffmpeg, file dialogs, transcript tail); a single webview renders the studio (state store, components, renderers, mixers). Typed RPC between them. See `CLAUDE.md` for the full subsystem map.
 
 ## Build
 

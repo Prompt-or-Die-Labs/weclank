@@ -3,3 +3,8 @@ build/
 dist/
 artifacts/
 *.tsbuildinfo
+.DS_Store
+.agents/
+.cursor/hooks/state/
+.lanes/
+skills-lock.json

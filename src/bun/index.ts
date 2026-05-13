@@ -13,7 +13,7 @@ import {
 
 import { openDb, getDbPath } from "./db/schema";
 import { signup, login, checkUser, deleteAccount, lookupUsername } from "./db/users";
-import { loadState, saveState, loadAllSecrets, setSecret, deleteSecret } from "./db/state";
+import { loadState, saveState, loadAllSecrets, loadSecret, setSecret, deleteSecret } from "./db/state";
 import { saveScript, saveGeneratedScript, loadScript, listScripts, deleteScript, updateScript } from "./db/scripts";
 import { randomUUID } from "node:crypto";
 import { open, unlink, stat } from "node:fs/promises";
@@ -170,10 +170,6 @@ type NativeMenuAction =
 	| "window.prompter"
 	| "window.closeUtilities"
 	| "app.quit";
-
-interface SecretValueRow {
-	value: string;
-}
 
 interface OpenRouterScriptResponse {
 	choices?: Array<{
@@ -1328,12 +1324,8 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 
 			generateScript: async ({ userId, topic }) => {
 				try {
-					const db = await openDb();
-					const secretStmt = db.prepare("SELECT value FROM user_secrets WHERE user_id = ? AND key_name = ?");
-					const secretRow = secretStmt.get(userId, "openrouter") as SecretValueRow | null;
-					if (!secretRow) return { ok: false, error: "OpenRouter API key not configured" };
-
-					const apiKey = secretRow.value;
+					const apiKey = await loadSecret(userId, "openrouter");
+					if (!apiKey) return { ok: false, error: "OpenRouter API key not configured" };
 
 					const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
 						method: "POST",

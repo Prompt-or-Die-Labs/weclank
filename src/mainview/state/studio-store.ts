@@ -107,7 +107,7 @@ const initial: StudioState = {
 	music: { volume: 0.4, current: null },
 	focusedParticipantId: null,
 	studioPrefs: {
-		focusMode: "full",
+		focusMode: "cohost",
 		mediaLibraryCategories: [...DEFAULT_MEDIA_LIBRARY_CATEGORIES],
 	},
 };
@@ -504,10 +504,10 @@ class StudioStore extends Store<StudioState> {
 function defaultStudioPrefs(p?: StudioPrefs): StudioPrefs {
 	const cats = DEFAULT_MEDIA_LIBRARY_CATEGORIES;
 	if (!p) {
-		return { focusMode: "full", mediaLibraryCategories: [...cats] };
+		return { focusMode: "cohost", mediaLibraryCategories: [...cats] };
 	}
 	return {
-		focusMode: p.focusMode ?? "full",
+		focusMode: p.focusMode ?? "cohost",
 		mediaLibraryRoot: p.mediaLibraryRoot,
 		mediaLibraryCategories:
 			p.mediaLibraryCategories !== undefined && p.mediaLibraryCategories.length > 0

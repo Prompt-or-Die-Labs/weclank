@@ -15,7 +15,7 @@ export type SourceKind =
 	| "text"; // text-only assistant — no audio/video, output shown in chat + producer tray
 
 /** Roles for text-only assistant participants. Each has a pre-canned system
- * prompt tuned to the Studio Live context; the user can override it. */
+ * prompt tuned to the Weclank context; the user can override it. */
 export type AssistantRole =
 	| "co-host" // Chat co-host that responds to viewers, voiced reply in text
 	| "chat-monitor" // Moderation, summaries, vibe checks
@@ -226,14 +226,13 @@ export interface TranscriptConfig {
 }
 
 /** Persisted UI / onboarding preferences — safe to merge on restore. */
-export type StudioFocusMode = "broadcast" | "full";
+export type StudioFocusMode = "cohost" | "broadcast" | "full";
 
 /** Default category folders under the media library root. */
 export const DEFAULT_MEDIA_LIBRARY_CATEGORIES: string[] = ["QR codes", "Generated", "Uploads"];
 
 export interface StudioPrefs {
-	/** When `broadcast`, the UI de-emphasizes AI-heavy paths until the user
-	 * is ready (focus on RTMP + camera first). */
+	/** `cohost` keeps the coding loop visible; `full` exposes every tool tab. */
 	focusMode?: StudioFocusMode;
 	/** Absolute root directory for saved QR PNGs, generated stills, and imports. */
 	mediaLibraryRoot?: string;

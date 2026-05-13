@@ -1,5 +1,5 @@
 // OpenAI native speech-to-text — `POST /v1/audio/transcriptions` with the
-// same platform API key as Codex / banter OpenAI (`user_secrets.openai`).
+// same platform API key as Codex / banter OpenAI (`openai` in local secrets).
 
 import { getSecret } from "../auth/secrets-cache";
 import { OPENAI_API_KEY } from "../auth/openai-api";

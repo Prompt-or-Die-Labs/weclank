@@ -3,11 +3,16 @@
 
 import { Modal } from "./overlays";
 import { bunRpc } from "../rpc";
+import { PRODUCT_PROMISE, PRODUCT_TAGLINE } from "../product";
 
 export async function openHelpDialog(): Promise<void> {
 	const body = document.createElement("div");
 	body.className = "help-dialog";
 	body.innerHTML = `
+		<section class="help-dialog__section">
+			<h3>What Weclank is for</h3>
+			<p><strong>${PRODUCT_PROMISE}</strong>. ${PRODUCT_TAGLINE}</p>
+		</section>
 		<section class="help-dialog__section">
 			<h3>Keyboard shortcuts</h3>
 			<dl>
@@ -39,7 +44,7 @@ export async function openHelpDialog(): Promise<void> {
 			<h3>Where things live</h3>
 			<dl>
 				<dt>Database</dt><dd data-field="dbPath">…</dd>
-				<dt>API keys & RTMP secrets</dt><dd>Stored in plaintext in the SQLite <code>user_secrets</code> table on this machine. Anyone with read access to the database file can read them — same practical model as shell history. Use full-disk encryption on laptops you care about.</dd>
+				<dt>API keys & RTMP secrets</dt><dd>Saved to the macOS Keychain when available. Linux and Windows builds keep them in the local SQLite account file for now; legacy plaintext rows still load until re-saved.</dd>
 				<dt>Account password</dt><dd>argon2id hash in <code>users.password_hash</code>. Forgot it? Delete the file and sign up again — local-only auth has no reset.</dd>
 			</dl>
 		</section>
@@ -49,8 +54,8 @@ export async function openHelpDialog(): Promise<void> {
 			<p><strong>OpenAI</strong> (Settings → Save OpenAI API key): standard platform <code>sk-</code> key — same as Codex / <code>OPENAI_API_KEY</code>. In Weclank it powers Chat Completions when an agent's LLM provider is OpenAI; <a href="https://platform.openai.com/docs/guides/images" target="_blank" rel="noopener">Images</a> for broadcast-image tools; OpenAI Speech when you pick that TTS provider in Voice settings; and mic transcription when you set the agent's banter STT to OpenAI (e.g. <code>whisper-1</code>). Each path uses this stored key — no separate env var in the app bundle.</p>
 		</section>
 		<section class="help-dialog__section">
-			<h3>MVP scope</h3>
-			<p>Weclank targets local-first compositing, hardware-assisted RTMP to one or many destinations, and AI-assisted overlays — not a full replacement for OBS's plugin ecosystem (no NDI ingest, no cloud project sync, minimal advanced audio busing).</p>
+			<h3>Product scope</h3>
+			<p>Weclank owns the coding-stream co-host loop: coding transcript, host mic context, chat response, overlay cueing, clip review, and post-stream output. It is not a general OBS replacement.</p>
 		</section>
 		<section class="help-dialog__section">
 			<h3>Open source</h3>

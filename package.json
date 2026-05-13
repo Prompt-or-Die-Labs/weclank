@@ -1,7 +1,7 @@
 {
 	"name": "weclank",
-	"version": "0.1.0",
-	"description": "Open-source local-first streaming studio with AI co-hosts",
+	"version": "0.3.0",
+	"description": "AI co-host for coding livestreams",
 	"scripts": {
 		"start": "electrobun dev",
 		"dev": "electrobun dev --watch",
