@@ -2712,6 +2712,42 @@ input, textarea, select { font: inherit; }
 	max-height: calc(100vh - 124px);
 	overflow: auto;
 }
+.recording-name {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-4);
+	min-width: min(420px, calc(100vw - 56px));
+}
+.recording-name__row {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.recording-name__row span {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-2);
+}
+.recording-name__row input {
+	background: var(--bg-0);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-0);
+	padding: 8px 10px;
+	font-family: var(--font-mono);
+	font-size: 12px;
+}
+.recording-name__row input:focus {
+	border-color: var(--text-0);
+	outline: none;
+}
+.recording-name__actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--space-2);
+}
 .popover {
 	position: fixed;
 	background: var(--bg-0);
@@ -4615,6 +4651,28 @@ input, textarea, select { font: inherit; }
 }
 .recording-review__path code {
 	font-size: 10px;
+}
+.recording-review__saved {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 0 0 var(--space-3);
+	padding: var(--space-2);
+	border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, var(--success) 10%, var(--bg-1));
+}
+.recording-review__saved strong {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--success);
+}
+.recording-review__saved code {
+	font-size: 10px;
+	word-break: break-all;
+	color: var(--text-1);
 }
 .recording-review__video-wrap {
 	margin-bottom: var(--space-2);

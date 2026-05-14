@@ -6,6 +6,7 @@ let cancelCalls = 0;
 let startResult: { success: boolean; path?: string; reason?: string; error?: string };
 let finishResult: { success: boolean; path?: string; reason?: string; error?: string };
 let lastChunkInterval = 0;
+let lastSuggestedName = "";
 const events: string[] = [];
 const originalMediaRecorder = globalThis.MediaRecorder;
 
@@ -51,11 +52,24 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 	}
 }
 
+async function submitRecordingName(value?: string): Promise<void> {
+	await waitFor(() => document.querySelector(".recording-name") !== null);
+	const input = document.querySelector<HTMLInputElement>(".recording-name input")!;
+	if (value !== undefined) input.value = value;
+	document.querySelector<HTMLFormElement>(".recording-name")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+}
+
+async function cancelRecordingName(): Promise<void> {
+	await waitFor(() => document.querySelector(".recording-name") !== null);
+	document.querySelector<HTMLButtonElement>('[data-action="cancel"]')?.click();
+}
+
 beforeAll(() => {
 	mock.module("../rpc", () => ({
 		bunRpc: {
-			startRecordingFile: async () => {
+			startRecordingFile: async ({ suggestedName }: { suggestedName: string }) => {
 				startCalls += 1;
+				lastSuggestedName = suggestedName;
 				return startResult;
 			},
 			cancelRecordingFile: async () => {
@@ -87,6 +101,7 @@ beforeEach(() => {
 	finishCalls = 0;
 	cancelCalls = 0;
 	lastChunkInterval = 0;
+	lastSuggestedName = "";
 	events.length = 0;
 	startResult = { success: false, reason: "canceled" };
 	finishResult = { success: false, reason: "canceled" };
@@ -98,19 +113,39 @@ afterEach(() => {
 			configurable: true,
 			value: originalMediaRecorder,
 		});
-	} else {
-		delete (globalThis as { MediaRecorder?: typeof MediaRecorder }).MediaRecorder;
-	}
-});
+		} else {
+			delete (globalThis as { MediaRecorder?: typeof MediaRecorder }).MediaRecorder;
+		}
+		document.querySelector<HTMLButtonElement>(".modal__close")?.click();
+		const root = document.querySelector<HTMLElement>("#overlay-root");
+		root?.replaceChildren();
+		for (const child of Array.from(document.body.children)) {
+			if (child !== root) child.remove();
+		}
+	});
 
 describe("localRecorder", () => {
 	test("reports a canceled picker without entering recording state", async () => {
 		const { localRecorder } = await import("./recorder");
 
-		const started = await localRecorder.start();
+		const start = localRecorder.start();
+		await submitRecordingName();
+		const started = await start;
 
 		expect(started).toBe(false);
 		expect(startCalls).toBe(1);
+		expect(lastSuggestedName).toMatch(/^weclank-\d{4}-\d{2}-\d{2}\.mp4$/);
+		expect(localRecorder.isRecording).toBe(false);
+	});
+
+	test("cancels before the folder picker when the name dialog is canceled", async () => {
+		const { localRecorder } = await import("./recorder");
+
+		const start = localRecorder.start();
+		await cancelRecordingName();
+
+		expect(await start).toBe(false);
+		expect(startCalls).toBe(0);
 		expect(localRecorder.isRecording).toBe(false);
 	});
 
@@ -122,11 +157,14 @@ describe("localRecorder", () => {
 		startResult = { success: true, path: "/tmp/weclank.mp4" };
 		const { localRecorder } = await import("./recorder");
 
-		const started = await localRecorder.start();
+		const start = localRecorder.start();
+		await submitRecordingName("launch clip");
+		const started = await start;
 		localRecorder.stop();
 		await waitFor(() => finishCalls === 1);
 
 		expect(started).toBe(true);
+		expect(lastSuggestedName).toBe("launch clip.mp4");
 		expect(lastChunkInterval).toBe(1_000);
 		expect(finishCalls).toBe(1);
 		expect(events.indexOf("write")).toBeGreaterThanOrEqual(0);

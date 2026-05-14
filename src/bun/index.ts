@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import { open, unlink, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { recordingFileName } from "../shared/recording-names";
 import {
 	buildFfmpegArgs,
 	buildRtmpUrl,
@@ -28,6 +29,7 @@ import {
 } from "./egress";
 import { augmentedProcessEnv } from "./ffmpeg-env";
 import { transcodeWebmFileToMp4, trimMp4Segment } from "./recording-transcode";
+import { uniqueRecordingOutputPath } from "./recording-file-path";
 import { exportShortMp4Segment, getShortExportPreset, type ShortExportPresetId } from "./short-export";
 import {
 	registerRecordingPreviewPath,
@@ -745,11 +747,7 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 					if (!chosenPaths[0] || chosenPaths[0] === "") {
 						return { success: false, reason: "canceled" };
 					}
-					const base = suggestedName.trim();
-					const mp4Name = base.toLowerCase().endsWith(".mp4")
-						? base
-						: `${base.replace(/\.webm$/i, "").replace(/\.mp4$/i, "")}.mp4`;
-					const savePath = `${chosenPaths[0]}/${mp4Name}`;
+					const savePath = await uniqueRecordingOutputPath(chosenPaths[0], recordingFileName(suggestedName));
 					staging = join(tmpdir(), `weclank-rec-${randomUUID()}.webm`);
 					recordingWriter = await open(staging, "w");
 					recordingStagingPath = staging;

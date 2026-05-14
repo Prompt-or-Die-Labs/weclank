@@ -16,6 +16,7 @@ import { AudioError, IpcError, userMessageFor } from "../core/errors";
 import { toast } from "../components/overlays";
 import { arrayBufferToBase64 } from "./base64";
 import { startBroadcastCapture, type BroadcastCaptureSession } from "./capture";
+import { recordingDateName } from "../../shared/recording-names";
 
 const RECORDER_CHUNK_INTERVAL_MS = 1_000;
 const RECORDER_STOP_TIMEOUT_MS = 45_000;
@@ -70,8 +71,9 @@ class LocalRecorder {
 		this.starting = true;
 		let diskSessionOpen = false;
 		try {
-			const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-			const suggestedName = `weclank-${ts}.mp4`;
+			const { pickRecordingFileName } = await import("./recording-name-dialog");
+			const suggestedName = await pickRecordingFileName(recordingDateName());
+			if (!suggestedName) return false;
 			let result = await bunRpc.startRecordingFile({ suggestedName });
 			if (!result.success && result.error === "Recording already in progress") {
 				// Orphaned main-process session — clear and retry once.
@@ -180,7 +182,7 @@ class LocalRecorder {
 			session.acceptingChunks = false;
 			if (savedPath) {
 				const { openRecordingReviewDialog } = await import("../components/recording-review-dialog");
-				openRecordingReviewDialog(savedPath);
+				openRecordingReviewDialog(savedPath, { saved: true });
 			}
 		}
 	}

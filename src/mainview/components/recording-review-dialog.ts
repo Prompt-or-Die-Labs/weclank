@@ -36,7 +36,7 @@ function presetFrom(value: string): ShortPreset {
 	return value === "reels" || value === "shorts" ? value : "tiktok";
 }
 
-export function openRecordingReviewDialog(filePath: string): void {
+export function openRecordingReviewDialog(filePath: string, options: { saved?: boolean } = {}): void {
 	let previewToken: string | null = null;
 	const exportPreviewTokens = new Set<string>();
 	const uid = `rr-${Date.now().toString(36)}`;
@@ -48,7 +48,7 @@ export function openRecordingReviewDialog(filePath: string): void {
 	const body = document.createElement("div");
 	body.className = "recording-review";
 	body.innerHTML = `
-		<p class="recording-review__path"><code>${escapeHtml(filePath)}</code></p>
+		${options.saved ? `<div class="recording-review__saved" role="status"><strong>Saved</strong><code>${escapeHtml(filePath)}</code></div>` : `<p class="recording-review__path"><code>${escapeHtml(filePath)}</code></p>`}
 		<div class="recording-review__video-wrap">
 			<video class="recording-review__video" id="${uid}-v" controls playsinline></video>
 		</div>

@@ -30,6 +30,15 @@ async function flush(): Promise<void> {
 }
 
 describe("recording review dialog", () => {
+	test("shows a saved confirmation when opened after recording", async () => {
+		const { openRecordingReviewDialog } = await import("./recording-review-dialog");
+		openRecordingReviewDialog("/tmp/source.mp4", { saved: true });
+
+		expect(document.querySelector(".recording-review__saved")).not.toBeNull();
+		expect(document.body.textContent).toContain("Saved");
+		expect(document.body.textContent).toContain("/tmp/source.mp4");
+	});
+
 	test("shows vertical export controls and previews exported clips", async () => {
 		const { openRecordingReviewDialog } = await import("./recording-review-dialog");
 		openRecordingReviewDialog("/tmp/source.mp4");
