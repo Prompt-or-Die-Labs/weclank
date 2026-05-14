@@ -10,17 +10,7 @@ export class ScreenRenderer implements AgentRenderer {
 	private video: HTMLVideoElement | null = null;
 	private stream: MediaStream | null = null;
 
-	async attach(ctx: RendererContext, _participant: Participant): Promise<void> {
-		const md = navigator.mediaDevices as MediaDevices & {
-			getDisplayMedia?: (c?: DisplayMediaStreamOptions) => Promise<MediaStream>;
-		};
-		if (!md?.getDisplayMedia) {
-			throw new RendererError(
-				"getDisplayMedia not available in this webview",
-				"Screen capture isn't supported in this build. On Linux this works in the CEF runtime; on macOS WKWebView requires the screen-recording entitlement.",
-			);
-		}
-
+	async attach(ctx: RendererContext, participant: Participant): Promise<void> {
 		this.video = document.createElement("video");
 		this.video.autoplay = true;
 		this.video.playsInline = true;
@@ -28,7 +18,7 @@ export class ScreenRenderer implements AgentRenderer {
 		this.video.className = "renderer-video";
 		ctx.host.appendChild(this.video);
 
-		this.stream = await md.getDisplayMedia({ video: true, audio: false });
+		this.stream = participant.mediaStream ?? await this.captureScreen();
 		this.video.srcObject = this.stream;
 		await new Promise<void>((resolve) => {
 			if (!this.video) {
@@ -48,6 +38,20 @@ export class ScreenRenderer implements AgentRenderer {
 			);
 		});
 		ctx.onReady?.();
+	}
+
+	private async captureScreen(): Promise<MediaStream> {
+		const md = navigator.mediaDevices as MediaDevices & {
+			getDisplayMedia?: (c?: DisplayMediaStreamOptions) => Promise<MediaStream>;
+		};
+		if (!md?.getDisplayMedia) {
+			throw new RendererError(
+				"getDisplayMedia not available in this webview",
+				"Screen capture isn't supported in this build. On Linux this works in the CEF runtime; on macOS WKWebView requires the screen-recording entitlement.",
+			);
+		}
+		window.focus();
+		return md.getDisplayMedia({ video: true, audio: false });
 	}
 
 	update(_participant: Participant): void {

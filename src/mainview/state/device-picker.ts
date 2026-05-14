@@ -27,7 +27,7 @@ const INTROS: Record<DeviceKind, string> = {
 	audioinput:
 		"Pick the audio input for this source. External-voice agents typically publish to a virtual audio cable — pick that here, not the built-in mic.",
 	videoinput:
-		"Pick the camera for this source. Studio captures from a virtual webcam (OBS Virtual Camera, etc.) work here too.",
+		"Pick the camera for this source. iPhone Continuity Camera, built-in webcams, and virtual cameras all appear here when macOS exposes them.",
 };
 
 export async function pickInputDevice(kind: DeviceKind): Promise<DevicePick | null> {

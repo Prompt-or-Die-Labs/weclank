@@ -17,9 +17,11 @@ import { toast } from "../components/overlays";
 import { arrayBufferToBase64 } from "./base64";
 import { startBroadcastCapture, type BroadcastCaptureSession } from "./capture";
 import { recordingDateName } from "../../shared/recording-names";
+import type { Participant } from "../core/types";
 
 const RECORDER_CHUNK_INTERVAL_MS = 1_000;
 const RECORDER_STOP_TIMEOUT_MS = 45_000;
+const RECORDER_FINISH_TIMEOUT_MS = 120_000;
 const RECORDER_FINAL_CHUNK_GRACE_MS = 750;
 
 interface RecorderSession {
@@ -71,6 +73,7 @@ class LocalRecorder {
 		this.starting = true;
 		let diskSessionOpen = false;
 		try {
+			if (!(await ensureRecordableSource())) return false;
 			const { pickRecordingFileName } = await import("./recording-name-dialog");
 			const suggestedName = await pickRecordingFileName(recordingDateName());
 			if (!suggestedName) return false;
@@ -163,7 +166,11 @@ class LocalRecorder {
 					"The recorder stopped before the webview delivered any encoded video. Try recording for another second.",
 				);
 			}
-			const result = await bunRpc.finishRecordingFile({});
+			const result = await promiseWithTimeout(
+				bunRpc.finishRecordingFile({}),
+				RECORDER_FINISH_TIMEOUT_MS,
+				"Recording save",
+			);
 			if (result.success && result.path) {
 				savedPath = result.path;
 				toast(`Recording saved to ${savedPath}`, "success");
@@ -211,3 +218,42 @@ class LocalRecorder {
 }
 
 export const localRecorder = new LocalRecorder();
+
+async function ensureRecordableSource(): Promise<boolean> {
+	if (hasRecordableSource()) return true;
+	const [{ createParticipantFromKind }, { pickRecordingSource }] = await Promise.all([
+		import("../state/source-factory"),
+		import("./recording-source-dialog"),
+	]);
+	const id = await pickRecordingSource(async (kind) => {
+		return createParticipantFromKind(kind, { startVideo: true });
+	});
+	if (!id) return false;
+	studio.updateSourcePlacement(studio.activeScene.id, id, { x: 0, y: 0, w: 1, h: 1, visible: true });
+	return hasRecordableSource();
+}
+
+function hasRecordableSource(): boolean {
+	return studio.activeScene.sources.some((source) => {
+		if (!source.visible) return false;
+		const participant = studio.state.participants[source.participantId];
+		return participant ? participantHasRecordableVideo(participant) : false;
+	});
+}
+
+function participantHasRecordableVideo(participant: Participant): boolean {
+	switch (participant.kind) {
+		case "screen":
+			return true;
+		case "camera":
+			return !participant.cameraOff;
+		case "voice":
+		case "voice-image":
+		case "voice-vrm":
+		case "voice-glb":
+			return true;
+		case "mic":
+		case "text":
+			return false;
+	}
+}

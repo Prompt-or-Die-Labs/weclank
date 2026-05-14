@@ -1,14 +1,21 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { participantId } from "../core/ids";
+import type { ParticipantId } from "../core/ids";
+import type { SourceKind } from "../core/types";
 
 let startCalls = 0;
 let finishCalls = 0;
 let cancelCalls = 0;
+let sourceCreateCalls = 0;
 let startResult: { success: boolean; path?: string; reason?: string; error?: string };
 let finishResult: { success: boolean; path?: string; reason?: string; error?: string };
 let lastChunkInterval = 0;
 let lastSuggestedName = "";
+let lastSourceKind = "";
+let lastSourceStartVideo = false;
 const events: string[] = [];
 const originalMediaRecorder = globalThis.MediaRecorder;
+const hostId = participantId("host");
 
 class DelayedFinalMediaRecorder extends EventTarget {
 	static isTypeSupported(): boolean {
@@ -64,6 +71,21 @@ async function cancelRecordingName(): Promise<void> {
 	document.querySelector<HTMLButtonElement>('[data-action="cancel"]')?.click();
 }
 
+async function cancelRecordingSource(): Promise<void> {
+	await waitFor(() => document.querySelector(".recording-source") !== null);
+	document.querySelector<HTMLButtonElement>('[data-action="cancel"]')?.click();
+}
+
+async function chooseRecordingSource(kind: "screen" | "camera"): Promise<void> {
+	await waitFor(() => document.querySelector(".recording-source") !== null);
+	document.querySelector<HTMLButtonElement>(`[data-kind="${kind}"]`)?.click();
+}
+
+async function markHostCameraOn(): Promise<void> {
+	const { studio } = await import("../state/studio-store");
+	studio.updateParticipant(hostId, { cameraOff: false });
+}
+
 beforeAll(() => {
 	mock.module("../rpc", () => ({
 		bunRpc: {
@@ -87,6 +109,25 @@ beforeAll(() => {
 			},
 		},
 	}));
+	mock.module("../state/source-factory", () => ({
+		createParticipantFromKind: async (kind: SourceKind, opts?: { startVideo?: boolean }) => {
+			sourceCreateCalls += 1;
+			lastSourceKind = kind;
+			lastSourceStartVideo = opts?.startVideo === true;
+			const { studio } = await import("../state/studio-store");
+			const id = participantId(`recording-${kind}`) as ParticipantId;
+			studio.addParticipant({
+				id,
+				displayName: kind,
+				kind,
+				muted: false,
+				cameraOff: false,
+				isAgent: false,
+			});
+			studio.addSource(studio.activeScene.id, id);
+			return id;
+		},
+	}));
 	mock.module("./stream-engine", () => ({
 		streamEngine: {
 			setResolution: () => {},
@@ -96,15 +137,20 @@ beforeAll(() => {
 	}));
 });
 
-beforeEach(() => {
+beforeEach(async () => {
 	startCalls = 0;
 	finishCalls = 0;
 	cancelCalls = 0;
+	sourceCreateCalls = 0;
 	lastChunkInterval = 0;
 	lastSuggestedName = "";
+	lastSourceKind = "";
+	lastSourceStartVideo = false;
 	events.length = 0;
 	startResult = { success: false, reason: "canceled" };
 	finishResult = { success: false, reason: "canceled" };
+	const { studio } = await import("../state/studio-store");
+	studio.installRestored({});
 });
 
 afterEach(() => {
@@ -127,6 +173,7 @@ afterEach(() => {
 describe("localRecorder", () => {
 	test("reports a canceled picker without entering recording state", async () => {
 		const { localRecorder } = await import("./recorder");
+		await markHostCameraOn();
 
 		const start = localRecorder.start();
 		await submitRecordingName();
@@ -140,12 +187,45 @@ describe("localRecorder", () => {
 
 	test("cancels before the folder picker when the name dialog is canceled", async () => {
 		const { localRecorder } = await import("./recorder");
+		await markHostCameraOn();
 
 		const start = localRecorder.start();
 		await cancelRecordingName();
 
 		expect(await start).toBe(false);
 		expect(startCalls).toBe(0);
+		expect(localRecorder.isRecording).toBe(false);
+	});
+
+	test("cancels before the folder picker when the empty-stage source setup is canceled", async () => {
+		const { localRecorder } = await import("./recorder");
+
+		const start = localRecorder.start();
+		await cancelRecordingSource();
+
+		expect(await start).toBe(false);
+		expect(sourceCreateCalls).toBe(0);
+		expect(startCalls).toBe(0);
+		expect(localRecorder.isRecording).toBe(false);
+	});
+
+	test("adds a screen source before naming an empty-stage recording", async () => {
+		const { localRecorder } = await import("./recorder");
+
+		const start = localRecorder.start();
+		await chooseRecordingSource("screen");
+		await submitRecordingName("screen proof");
+		const started = await start;
+		const { studio } = await import("../state/studio-store");
+		const screenSource = studio.activeScene.sources.find((source) => source.participantId === participantId("recording-screen"));
+
+		expect(started).toBe(false);
+		expect(sourceCreateCalls).toBe(1);
+		expect(lastSourceKind).toBe("screen");
+		expect(lastSourceStartVideo).toBe(true);
+		expect(startCalls).toBe(1);
+		expect(lastSuggestedName).toBe("screen proof.mp4");
+		expect(screenSource).toMatchObject({ x: 0, y: 0, w: 1, h: 1, visible: true });
 		expect(localRecorder.isRecording).toBe(false);
 	});
 
@@ -156,6 +236,7 @@ describe("localRecorder", () => {
 		});
 		startResult = { success: true, path: "/tmp/weclank.mp4" };
 		const { localRecorder } = await import("./recorder");
+		await markHostCameraOn();
 
 		const start = localRecorder.start();
 		await submitRecordingName("launch clip");

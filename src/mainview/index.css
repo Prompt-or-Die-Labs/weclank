@@ -705,10 +705,15 @@ input, textarea, select { font: inherit; }
 .channel-strip__add { color: var(--on-dark-2); }
 
 /* Link-channel dialog: platform tile grid. */
+.channel-link {
+	width: min(560px, calc(100vw - 72px));
+}
 .channel-link__platforms {
 	display: grid;
-	grid-template-columns: repeat(5, minmax(0, 1fr));
-	gap: 6px;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	grid-template-rows: repeat(3, 88px);
+	grid-auto-rows: 88px;
+	gap: 8px;
 	margin: 0 0 var(--space-3);
 }
 .channel-link__platform {
@@ -777,6 +782,8 @@ input, textarea, select { font: inherit; }
 .channel-link__hint {
 	margin: 0 0 var(--space-3);
 	padding: var(--space-2) var(--space-3);
+	height: 58px;
+	overflow: auto;
 	font-size: 11px;
 	line-height: 1.45;
 	color: var(--text-1);
@@ -2747,6 +2754,32 @@ input, textarea, select { font: inherit; }
 	display: flex;
 	justify-content: flex-end;
 	gap: var(--space-2);
+}
+.recording-source {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-4);
+	min-width: min(380px, calc(100vw - 56px));
+}
+.recording-source p {
+	margin: 0;
+	color: var(--text-2);
+	font-size: 12px;
+}
+.recording-source__actions {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--space-2);
+}
+.recording-source__actions button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	min-height: 38px;
+}
+.recording-source__actions [data-action="cancel"] {
+	grid-column: 1 / -1;
 }
 .popover {
 	position: fixed;

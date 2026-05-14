@@ -21,6 +21,7 @@ import type { AssistantRole, Participant, SourceKind, TTSConfig, VisualConfig } 
 
 interface CreateOptions {
 	autoAssign?: boolean; // default true — drop into first empty slot
+	startVideo?: boolean;
 }
 
 export async function createParticipantFromKind(
@@ -45,7 +46,7 @@ export async function createParticipantFromKind(
 	// at scene-add time. Flipped to "on" below if the user opted into the
 	// combined mic flow, since at that point they've already granted
 	// permission and the tracks are live.
-	let cameraOff = kind === "camera";
+	let cameraOff = kind === "camera" && opts.startVideo !== true;
 
 	switch (kind) {
 		case "camera": {
@@ -55,6 +56,19 @@ export async function createParticipantFromKind(
 			if (!picked) return null;
 			displayName = picked.label;
 			videoDeviceId = picked.deviceId;
+			if (opts.startVideo) {
+				try {
+					mediaStream = await navigator.mediaDevices.getUserMedia({
+						video: { deviceId: { exact: picked.deviceId } },
+						audio: false,
+					});
+					cameraOff = false;
+				} catch (err) {
+					toast(`Camera failed: ${userMessageFor(err)}`, "error");
+					return null;
+				}
+				break;
+			}
 
 			// Optional: pair a mic with the camera. Critical for VAD —
 			// the banter agent's "pause while I'm speaking" only works if
@@ -93,8 +107,26 @@ export async function createParticipantFromKind(
 			}
 			break;
 		}
-		case "screen":
+		case "screen": {
+			const md = navigator.mediaDevices as MediaDevices & {
+				getDisplayMedia?: (c?: DisplayMediaStreamOptions) => Promise<MediaStream>;
+			};
+			if (!md?.getDisplayMedia) {
+				toast(
+					"Screen capture isn't supported in this build. Try the CEF build or upgrade your OS.",
+					"error",
+				);
+				return null;
+			}
+			try {
+				window.focus();
+				mediaStream = await md.getDisplayMedia({ video: true, audio: false });
+			} catch (err) {
+				toast(`Screen capture failed: ${userMessageFor(err)}`, "error");
+				return null;
+			}
 			break;
+		}
 		case "mic": {
 			// Audio-only local capture — entry point for external-voice
 			// agents that pipe audio through a virtual cable.
