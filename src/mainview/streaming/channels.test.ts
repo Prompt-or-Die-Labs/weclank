@@ -8,7 +8,8 @@ import { buildFfmpegArgs } from "../../bun/egress";
 
 const PLATFORMS: PlatformId[] = [
 	"twitch", "youtube", "facebook", "rumble",
-	"x", "kick", "tiktok", "instagram", "linkedin", "custom",
+	"x", "kick", "tiktok", "instagram", "linkedin",
+	"pumpfun", "retaketv", "custom",
 ];
 
 function ch(overrides: Partial<RtmpChannel> & { id: string; platform: PlatformId }): RtmpChannel {
@@ -31,6 +32,9 @@ describe("detectPlatform", () => {
 		expect(detectPlatform("rtmp://push-rtmp-l1-mvb.tiktokcdn.com/abc")).toBe("tiktok");
 		expect(detectPlatform("rtmps://live-upload.instagram.com/rtmp/")).toBe("instagram");
 		expect(detectPlatform("rtmps://1234.linkedin.com/live")).toBe("linkedin");
+		expect(detectPlatform("rtmp://ingest.pump.fun/live/abc")).toBe("pumpfun");
+		expect(detectPlatform("rtmp://livepeer.example.net/stream")).toBe("pumpfun");
+		expect(detectPlatform("rtmp://ingest.retake.tv/live")).toBe("retaketv");
 	});
 
 	test("falls back to custom for unknown hosts", () => {
@@ -69,7 +73,12 @@ describe("platform metadata", () => {
 	test("gated platforms leave the URL blank (user pastes their own)", () => {
 		// These require per-user URLs from the platform's dashboard
 		// (or partner/approval status). The hint tells them where to find it.
-		const gatedPlatforms: PlatformId[] = ["kick", "tiktok", "instagram", "linkedin", "custom"];
+		// pump.fun: per-stream dynamic ingest. retake.tv: browser-only,
+		// no public RTMP ingest as of this writing.
+		const gatedPlatforms: PlatformId[] = [
+			"kick", "tiktok", "instagram", "linkedin",
+			"pumpfun", "retaketv", "custom",
+		];
 		for (const p of gatedPlatforms) {
 			expect(PLATFORM_RTMP_PREFIX[p]).toBe("");
 		}

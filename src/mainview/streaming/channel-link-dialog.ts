@@ -38,7 +38,7 @@ export function openChannelLinkDialog(options: LinkOptions = {}): Promise<RtmpCh
 		const renderForm = (): void => {
 			body.innerHTML = `
 				<div class="channel-link__platforms" role="radiogroup" aria-label="Platform">
-					${(["twitch","youtube","facebook","kick","rumble","x","tiktok","instagram","linkedin"] as BrandId[]).map((id) => `
+					${(["twitch","youtube","facebook","kick","rumble","x","tiktok","instagram","linkedin","pumpfun","retaketv"] as BrandId[]).map((id) => `
 						<button
 							type="button"
 							class="channel-link__platform${platform === id ? " is-selected" : ""}"

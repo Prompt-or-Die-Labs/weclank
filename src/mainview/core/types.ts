@@ -161,6 +161,8 @@ export type PlatformId =
 	| "tiktok"
 	| "instagram"
 	| "linkedin"
+	| "pumpfun"
+	| "retaketv"
 	| "custom";
 
 /** A saved RTMP destination tied to a platform. The user can have many

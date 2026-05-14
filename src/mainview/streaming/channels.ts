@@ -51,6 +51,14 @@ export const PLATFORM_RTMP_PREFIX: Record<PlatformId, string> = {
 	// LinkedIn Live requires approved-partner status; the URL comes from
 	// the LinkedIn Live API or partner dashboard.
 	linkedin:  "",
+	// pump.fun mints a per-stream RTMP URL + key when the creator clicks
+	// "Start livestream → RTMP mode" on their coin page. The host varies
+	// across their Livepeer-backed ingest fleet, so no static prefix.
+	pumpfun:   "",
+	// retake.tv is currently browser-only (WebRTC). The platform is
+	// listed for parity but the URL stays blank until they ship RTMP
+	// ingest. The hint flags this in the link dialog.
+	retaketv:  "",
 	custom:    "",
 };
 
@@ -68,6 +76,8 @@ export const PLATFORM_HINTS: Record<PlatformId, string> = {
 	tiktok:    "Requires TikTok LIVE Studio app or partner approval. Use the dynamic URL from your LIVE setup.",
 	instagram: "Live Producer is Meta Business / Creator accounts only. Copy URL + key from instagram.com → Live.",
 	linkedin:  "LinkedIn Live requires approved-partner status. Use the URL from your LinkedIn Live API setup.",
+	pumpfun:   "Open your pump.fun coin → Start livestream → RTMP mode → copy the Stream URL and key shown.",
+	retaketv:  "retake.tv currently streams from the browser only — paste an RTMP URL here once they ship third-party ingest.",
 	custom:    "Any RTMP / RTMPS endpoint. Paste the URL and stream key from your hosting provider.",
 };
 
@@ -82,6 +92,8 @@ export function detectPlatform(rtmpUrl: string): PlatformId {
 	if (url.includes("tiktokcdn") || url.includes("tiktok")) return "tiktok";
 	if (url.includes("instagram")) return "instagram";
 	if (url.includes("linkedin")) return "linkedin";
+	if (url.includes("pump.fun") || url.includes("livepeer")) return "pumpfun";
+	if (url.includes("retake.tv")) return "retaketv";
 	return "custom";
 }
 
