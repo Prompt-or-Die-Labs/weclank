@@ -198,7 +198,7 @@ export class ChatTab extends Component<State> {
 			this.on(input, "input", () => {
 				const platform = input.dataset["platform"] as ChatPlatformId;
 				const channels = { ...this.state.channels, [platform]: input.value };
-				this.setState({ channels });
+				this.state = { ...this.state, channels };
 			});
 		}
 		for (const btn of this.$$<HTMLButtonElement>("[data-pin]")) {
