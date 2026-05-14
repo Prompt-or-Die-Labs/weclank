@@ -15,6 +15,7 @@ function fmtClock(sec: number): string {
 
 export function openRecordingReviewDialog(filePath: string): void {
 	let previewToken: string | null = null;
+	const exportPreviewTokens = new Set<string>();
 	const uid = `rr-${Date.now().toString(36)}`;
 
 	const body = document.createElement("div");
@@ -48,6 +49,10 @@ export function openRecordingReviewDialog(filePath: string): void {
 				<option value="shorts">Shorts 1080x1920</option>
 			</select>
 		</div>
+		<section class="recording-review__exports" id="${uid}-exports" hidden>
+			<div class="recording-review__label">Exported clips</div>
+			<div class="recording-review__export-list" id="${uid}-export-list"></div>
+		</section>
 		<p class="recording-review__hint">Keeps <strong id="${uid}-lab0">0:00</strong> → <strong id="${uid}-lab1">0:00</strong> (<span id="${uid}-dlen">0:00</span>). <strong>Save trimmed copy</strong> writes a new MP4; the file above stays until you delete it.</p>
 		<div class="recording-review__actions">
 			<button type="button" class="primary" id="${uid}-save">Save trimmed copy…</button>
@@ -63,6 +68,8 @@ export function openRecordingReviewDialog(filePath: string): void {
 	const t0 = body.querySelector<HTMLInputElement>(`#${uid}-t0`)!;
 	const t1 = body.querySelector<HTMLInputElement>(`#${uid}-t1`)!;
 	const preset = body.querySelector<HTMLSelectElement>(`#${uid}-preset`)!;
+	const exportsSection = body.querySelector<HTMLElement>(`#${uid}-exports`)!;
+	const exportList = body.querySelector<HTMLElement>(`#${uid}-export-list`)!;
 	const lab0 = body.querySelector<HTMLElement>(`#${uid}-lab0`)!;
 	const lab1 = body.querySelector<HTMLElement>(`#${uid}-lab1`)!;
 	const dlen = body.querySelector<HTMLElement>(`#${uid}-dlen`)!;
@@ -85,6 +92,10 @@ export function openRecordingReviewDialog(filePath: string): void {
 					await bunRpc.unregisterRecordingPreview({ token: previewToken }).catch(() => {});
 					previewToken = null;
 				}
+				for (const token of exportPreviewTokens) {
+					await bunRpc.unregisterRecordingPreview({ token }).catch(() => {});
+				}
+				exportPreviewTokens.clear();
 				video.removeAttribute("src");
 				video.load();
 			})();
@@ -138,6 +149,7 @@ export function openRecordingReviewDialog(filePath: string): void {
 			if (r.reason === "canceled") return;
 			if (!r.ok || !r.path) throw new Error(r.error ?? "Trim failed");
 			toast(`Saved trimmed copy to ${r.path}`, "success");
+			void addExportPreview("Trimmed copy", r.path);
 		} catch (e) {
 			toast(userMessageFor(e), "error");
 		}
@@ -158,6 +170,7 @@ export function openRecordingReviewDialog(filePath: string): void {
 			if (r.reason === "canceled") return;
 			if (!r.ok || !r.path) throw new Error(r.error ?? "Short export failed");
 			toast(`Saved vertical short to ${r.path}`, "success");
+			void addExportPreview(`${chosen.toUpperCase()} short`, r.path);
 		} catch (e) {
 			toast(userMessageFor(e), "error");
 		}
@@ -210,4 +223,26 @@ export function openRecordingReviewDialog(filePath: string): void {
 		previewToken = reg.token;
 		video.src = reg.url;
 	})();
+
+	async function addExportPreview(label: string, path: string): Promise<void> {
+		exportsSection.hidden = false;
+		const card = document.createElement("article");
+		card.className = "recording-review__export";
+		card.innerHTML = `
+			<div class="recording-review__export-head">
+				<strong>${escapeHtml(label)}</strong>
+				<code>${escapeHtml(path)}</code>
+			</div>
+			<div class="recording-review__export-preview">Preparing preview...</div>
+		`;
+		exportList.prepend(card);
+		const preview = card.querySelector<HTMLElement>(".recording-review__export-preview")!;
+		const reg = await bunRpc.registerRecordingPreview({ path });
+		if (!reg.ok || !reg.url || !reg.token) {
+			preview.textContent = reg.error ?? "Preview unavailable";
+			return;
+		}
+		exportPreviewTokens.add(reg.token);
+		preview.innerHTML = `<video controls playsinline src="${escapeHtml(reg.url)}"></video>`;
+	}
 }

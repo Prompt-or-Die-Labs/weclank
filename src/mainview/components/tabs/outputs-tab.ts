@@ -205,7 +205,7 @@ export class OutputsTab extends Component<State> {
 								<div class="tab-outputs__short-meta">
 									<span>${escapeHtml(clip.preset)}</span>
 									<span>${escapeHtml(clip.captionStyle)}</span>
-									<span>${escapeHtml(clip.brollPrompts.slice(0, 2).join(" / "))}</span>
+									<span>B-roll: ${escapeHtml(clip.brollPrompts.slice(0, 2).join(" / "))}</span>
 								</div>
 							</article>
 						`).join("")}
