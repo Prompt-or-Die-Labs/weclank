@@ -27,6 +27,7 @@ describe("OutputsTab", () => {
 			expect(document.body.querySelectorAll(".tab-outputs__short").length).toBeGreaterThan(0);
 			expect(document.body.textContent).toContain("Hook");
 			expect(document.body.textContent).toContain("B-roll");
+			expect(document.body.textContent).toContain("Timeline-ready clips");
 		} finally {
 			tab.destroy();
 		}

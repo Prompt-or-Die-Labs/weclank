@@ -203,12 +203,18 @@ export class OutputsTab extends Component<State> {
 								</div>
 								<p>${escapeHtml(clip.virality.reason)}</p>
 								<div class="tab-outputs__short-meta">
+									${clip.timecode ? `<span>${escapeHtml(clip.timecode)}</span>` : ""}
 									<span>${escapeHtml(clip.preset)}</span>
 									<span>${escapeHtml(clip.captionStyle)}</span>
 									<span>B-roll: ${escapeHtml(clip.brollPrompts.slice(0, 2).join(" / "))}</span>
 								</div>
 							</article>
 						`).join("")}
+						<div class="tab-outputs__clip-flow">
+							<span>Timeline-ready clips</span>
+							<strong>${this.state.shortForm.clips.length}</strong>
+							<em>Review recording cuts MP4 clips and platform shorts from the same ranges.</em>
+						</div>
 					</div>`}
 				<ul class="tab-outputs__recommendations">
 					${this.state.shortForm.productionNotes.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}
