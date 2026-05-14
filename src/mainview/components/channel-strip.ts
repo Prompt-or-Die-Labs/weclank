@@ -114,8 +114,8 @@ export class ChannelStrip extends Component<State> {
 		const menu = document.createElement("div");
 		menu.className = "menu";
 		menu.innerHTML = `
-			<button class="menu__item" data-act="edit">Edit channel…</button>
-			<button class="menu__item menu__item--danger" data-act="remove">Remove channel</button>
+			<button class="menu__item" data-act="edit"><span class="menu__icon" aria-hidden="true">${Icons.edit(14)}</span><span>Edit channel…</span></button>
+			<button class="menu__item menu__item--danger" data-act="remove"><span class="menu__icon" aria-hidden="true">${Icons.trash(14)}</span><span>Remove channel</span></button>
 		`;
 		const popover = new Popover({ anchor, content: menu });
 		menu.querySelectorAll<HTMLButtonElement>("[data-act]").forEach((btn) => {

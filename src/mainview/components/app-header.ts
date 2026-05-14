@@ -34,13 +34,13 @@ interface State {
 
 type UtilityKind = "studio" | "chat" | "producer" | "stats" | "overlay" | "prompter";
 
-const UTILITY_ITEMS: Array<{ kind: UtilityKind; label: string }> = [
-	{ kind: "studio", label: "Studio Dock" },
-	{ kind: "chat", label: "Chat" },
-	{ kind: "producer", label: "Producer" },
-	{ kind: "stats", label: "Monitor" },
-	{ kind: "overlay", label: "Overlay" },
-	{ kind: "prompter", label: "Prompter" },
+const UTILITY_ITEMS: Array<{ kind: UtilityKind; label: string; icon: () => string }> = [
+	{ kind: "studio", label: "Studio Dock", icon: () => Icons.window(14) },
+	{ kind: "chat", label: "Chat", icon: () => Icons.chat(14) },
+	{ kind: "producer", label: "Producer", icon: () => Icons.bot(14) },
+	{ kind: "stats", label: "Monitor", icon: () => Icons.monitor(14) },
+	{ kind: "overlay", label: "Overlay", icon: () => Icons.graphics(14) },
+	{ kind: "prompter", label: "Prompter", icon: () => Icons.notes(14) },
 ];
 
 export class AppHeader extends Component<State> {
@@ -147,17 +147,19 @@ export class AppHeader extends Component<State> {
 		menu.innerHTML = `
 			<div class="menu__section">Signed in as ${this.state.username}</div>
 			<button class="menu__item" data-act="openrouter">
-				OpenRouter
+				<span class="menu__icon" aria-hidden="true">${Icons.radio(14)}</span>
+				<span>OpenRouter</span>
 				<small>${connected ? "● connected" : "○ not connected"}</small>
 			</button>
 			<button class="menu__item" data-act="openai-key">
-				OpenAI API key
+				<span class="menu__icon" aria-hidden="true">${Icons.key(14)}</span>
+				<span>OpenAI API key</span>
 				<small>${openAiSaved ? "● saved" : "○ not set"}</small>
 			</button>
-			<button class="menu__item" data-act="settings">Settings…</button>
+			<button class="menu__item" data-act="settings"><span class="menu__icon" aria-hidden="true">${Icons.settings(14)}</span><span>Settings…</span></button>
 			<div class="menu__divider"></div>
-			<button class="menu__item" data-act="signout">Sign out</button>
-			<button class="menu__item menu__item--danger" data-act="delete">Delete account</button>
+			<button class="menu__item" data-act="signout"><span class="menu__icon" aria-hidden="true">${Icons.logOut(14)}</span><span>Sign out</span></button>
+			<button class="menu__item menu__item--danger" data-act="delete"><span class="menu__icon" aria-hidden="true">${Icons.trash(14)}</span><span>Delete account</span></button>
 		`;
 		const popover = new Popover({ anchor, content: menu });
 		menu.querySelectorAll<HTMLButtonElement>("[data-act]").forEach((btn) => {
@@ -193,9 +195,9 @@ export class AppHeader extends Component<State> {
 		menu.className = "menu menu--utilities";
 		menu.innerHTML = `
 			<div class="menu__section">Utility windows</div>
-			${UTILITY_ITEMS.map((item) => `<button class="menu__item" data-kind="${item.kind}">${item.label}</button>`).join("")}
+			${UTILITY_ITEMS.map((item) => `<button class="menu__item" data-kind="${item.kind}"><span class="menu__icon" aria-hidden="true">${item.icon()}</span><span>${item.label}</span></button>`).join("")}
 			<div class="menu__divider"></div>
-			<button class="menu__item" data-close="all">Close utilities</button>
+			<button class="menu__item" data-close="all"><span class="menu__icon" aria-hidden="true">${Icons.minimize(14)}</span><span>Close utilities</span></button>
 		`;
 		const popover = new Popover({ anchor, content: menu });
 		menu.querySelectorAll<HTMLButtonElement>("[data-kind]").forEach((btn) => {
@@ -238,8 +240,8 @@ export class AppHeader extends Component<State> {
 		const menu = document.createElement("div");
 		menu.className = "menu";
 		menu.innerHTML = `
-			<button class="menu__item" data-act="rename">Rename event…</button>
-			<button class="menu__item" data-act="destinations">Stream destinations…</button>
+			<button class="menu__item" data-act="rename"><span class="menu__icon" aria-hidden="true">${Icons.edit(14)}</span><span>Rename event…</span></button>
+			<button class="menu__item" data-act="destinations"><span class="menu__icon" aria-hidden="true">${Icons.radio(14)}</span><span>Stream destinations…</span></button>
 		`;
 		const popover = new Popover({ anchor, content: menu });
 		menu.querySelectorAll<HTMLButtonElement>("[data-act]").forEach((btn) => {
@@ -265,11 +267,11 @@ export class AppHeader extends Component<State> {
 		menu.className = "menu";
 		menu.innerHTML = `
 			<div class="menu__section">Quality</div>
-			<button class="menu__item" data-quality="480p" aria-pressed="${quality === "480p"}">480p</button>
-			<button class="menu__item" data-quality="720p" aria-pressed="${quality === "720p"}">720p</button>
-			<button class="menu__item" data-quality="1080p" aria-pressed="${quality === "1080p"}">1080p</button>
+			<button class="menu__item" data-quality="480p" aria-pressed="${quality === "480p"}"><span class="menu__icon" aria-hidden="true">${Icons.monitor(14)}</span><span>480p</span></button>
+			<button class="menu__item" data-quality="720p" aria-pressed="${quality === "720p"}"><span class="menu__icon" aria-hidden="true">${Icons.monitor(14)}</span><span>720p</span></button>
+			<button class="menu__item" data-quality="1080p" aria-pressed="${quality === "1080p"}"><span class="menu__icon" aria-hidden="true">${Icons.monitor(14)}</span><span>1080p</span></button>
 			<div class="menu__section">Recording</div>
-			<button class="menu__item" data-record="toggle">${studio.state.stream.recording || localRecorder.isRecording ? "Stop local recording" : "Start local recording"}</button>
+			<button class="menu__item" data-record="toggle"><span class="menu__icon" aria-hidden="true">${Icons.radio(14)}</span><span>${studio.state.stream.recording || localRecorder.isRecording ? "Stop local recording" : "Start local recording"}</span></button>
 		`;
 		const popover = new Popover({ anchor, content: menu });
 		menu.querySelectorAll<HTMLButtonElement>("[data-quality]").forEach((btn) => {

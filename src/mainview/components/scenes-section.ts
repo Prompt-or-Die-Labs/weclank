@@ -155,9 +155,9 @@ export class ScenesSection extends Component<State> {
 		const menu = document.createElement("div");
 		menu.className = "menu";
 		menu.innerHTML = `
-			<button class="menu__item" data-act="rename">Rename…</button>
-			<button class="menu__item" data-act="duplicate">Duplicate</button>
-			<button class="menu__item menu__item--danger" data-act="delete">Delete</button>
+			<button class="menu__item" data-act="rename"><span class="menu__icon" aria-hidden="true">${Icons.edit(14)}</span><span>Rename…</span></button>
+			<button class="menu__item" data-act="duplicate"><span class="menu__icon" aria-hidden="true">${Icons.copy(14)}</span><span>Duplicate</span></button>
+			<button class="menu__item menu__item--danger" data-act="delete"><span class="menu__icon" aria-hidden="true">${Icons.trash(14)}</span><span>Delete</span></button>
 		`;
 		const popover = new Popover({ anchor, content: menu });
 		menu.querySelectorAll<HTMLButtonElement>("[data-act]").forEach((btn) => {

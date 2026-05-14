@@ -5,7 +5,10 @@
 import { Modal } from "../components/overlays";
 import { studio } from "../state/studio-store";
 import { getSecret, setSecretAndPersist } from "../auth/secrets-cache";
+import { Brands, BRAND_COLORS, BRAND_LABELS, Icons } from "../core/icons";
+import type { BrandId } from "../core/icons";
 import type { StreamQuality } from "../core/types";
+import { PLATFORM_RTMP_PREFIX } from "./channels";
 import type { EgressTarget } from "./egress";
 
 const SECRET_KEY = "rtmp_destinations";
@@ -13,6 +16,8 @@ const SECRET_KEY = "rtmp_destinations";
 interface StoredDestinations {
 	destinations: EgressTarget[];
 }
+
+const RTMP_PRESETS = ["twitch", "youtube", "facebook", "rumble", "x"] as const satisfies readonly BrandId[];
 
 function loadDestinations(): EgressTarget[] {
 	const raw = getSecret(SECRET_KEY);
@@ -96,10 +101,16 @@ export function pickRtmpDestination(options: { intent?: "go-live" | "settings" }
 				The same encode is fanned out to every destination via ffmpeg's <code>tee</code> muxer.
 			</p>
 			<div class="rtmp-dialog__presets" aria-label="RTMP URL presets">
-				<button type="button" data-preset="rtmp://live.twitch.tv/app">Twitch</button>
-				<button type="button" data-preset="rtmp://a.rtmp.youtube.com/live2">YouTube</button>
-				<button type="button" data-preset="rtmps://live-api-s.facebook.com:443/rtmp/">Facebook</button>
-				<button type="button" data-preset="">Custom</button>
+				${RTMP_PRESETS.map((id) => renderPreset(id)).join("")}
+				<button type="button" class="rtmp-dialog__preset rtmp-dialog__preset--retake" aria-label="retake.tv coming soon" disabled>
+					<span class="rtmp-dialog__preset-glyph" aria-hidden="true"><img src="./assets/retaketv.svg" alt="" /></span>
+					<span class="rtmp-dialog__preset-label">retake.tv</span>
+					<span class="rtmp-dialog__coming-soon">Coming soon</span>
+				</button>
+				<button type="button" class="rtmp-dialog__preset" data-preset="">
+					<span class="rtmp-dialog__preset-glyph" aria-hidden="true">${Icons.layoutSwap(18)}</span>
+					<span class="rtmp-dialog__preset-label">Custom</span>
+				</button>
 			</div>
 			<div data-region="rows"></div>
 			<button type="button" class="rtmp-dialog__add" data-action="add">+ Add channel</button>
@@ -158,4 +169,13 @@ export function pickRtmpDestination(options: { intent?: "go-live" | "settings" }
 
 function escapeAttr(s: string): string {
 	return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function renderPreset(id: BrandId): string {
+	return `
+		<button type="button" class="rtmp-dialog__preset" data-preset="${escapeAttr(PLATFORM_RTMP_PREFIX[id])}" style="--brand-color: ${BRAND_COLORS[id]};">
+			<span class="rtmp-dialog__preset-glyph" aria-hidden="true">${Brands[id](18)}</span>
+			<span class="rtmp-dialog__preset-label">${BRAND_LABELS[id]}</span>
+		</button>
+	`;
 }

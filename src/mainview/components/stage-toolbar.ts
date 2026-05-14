@@ -153,15 +153,15 @@ export class StageToolbar extends Component<State> {
 		menu.className = "menu";
 		menu.innerHTML = `
 			<div class="menu__section">Local</div>
-			<button class="menu__item" data-kind="camera">Webcam</button>
-			<button class="menu__item" data-kind="screen">Screen capture</button>
-			<button class="menu__item" data-kind="mic">Microphone <small>(external agent)</small></button>
+			<button class="menu__item" data-kind="camera"><span class="menu__icon" aria-hidden="true">${Icons.camera(14)}</span><span>Webcam</span></button>
+			<button class="menu__item" data-kind="screen"><span class="menu__icon" aria-hidden="true">${Icons.screen(14)}</span><span>Screen capture</span></button>
+			<button class="menu__item" data-kind="mic"><span class="menu__icon" aria-hidden="true">${Icons.mic(14)}</span><span>Microphone</span><small>external agent</small></button>
 			<div class="menu__section">AI co-host</div>
-			<button class="menu__item" data-kind="voice">Voice only</button>
-			<button class="menu__item" data-kind="voice-image">Voice + image</button>
-			<button class="menu__item" data-kind="voice-vrm">Voice + VRM avatar…</button>
-			<button class="menu__item" data-kind="voice-glb">Voice + GLB model…</button>
-			<button class="menu__item" data-kind="text">Text assistant</button>
+			<button class="menu__item" data-kind="voice"><span class="menu__icon" aria-hidden="true">${Icons.bot(14)}</span><span>Voice only</span></button>
+			<button class="menu__item" data-kind="voice-image"><span class="menu__icon" aria-hidden="true">${Icons.image(14)}</span><span>Voice + image</span></button>
+			<button class="menu__item" data-kind="voice-vrm"><span class="menu__icon" aria-hidden="true">${Icons.user(14)}</span><span>Voice + VRM avatar…</span></button>
+			<button class="menu__item" data-kind="voice-glb"><span class="menu__icon" aria-hidden="true">${Icons.layoutSwap(14)}</span><span>Voice + GLB model…</span></button>
+			<button class="menu__item" data-kind="text"><span class="menu__icon" aria-hidden="true">${Icons.notes(14)}</span><span>Text assistant</span></button>
 		`;
 		const popover = new Popover({ anchor, content: menu });
 		menu.querySelectorAll<HTMLButtonElement>("[data-kind]").forEach((btn) => {

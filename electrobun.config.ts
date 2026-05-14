@@ -19,6 +19,7 @@ export default {
 		copy: {
 			"src/mainview/index.html": "views/mainview/index.html",
 			"src/mainview/index.css": "views/mainview/index.css",
+			"src/mainview/assets/retaketv.svg": "views/mainview/assets/retaketv.svg",
 			"src/prompter/index.html": "views/prompter/index.html",
 		},
 		mac: {

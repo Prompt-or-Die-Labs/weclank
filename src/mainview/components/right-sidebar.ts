@@ -2,6 +2,7 @@
 // mode hides optional broadcast toys until the user asks for the full studio.
 
 import { Component } from "../core/component";
+import { Icons } from "../core/icons";
 import { studio } from "../state/studio-store";
 import { ChatTab } from "./tabs/chat-tab";
 import { AgentsTab } from "./tabs/agents-tab";
@@ -14,14 +15,14 @@ import type { StudioFocusMode } from "../core/types";
 
 type TabId = "chat" | "banters" | "agents" | "media" | "music" | "notes" | "outputs";
 
-const TABS: { id: TabId; label: string }[] = [
-	{ id: "agents",  label: "Agents" },
-	{ id: "chat",    label: "Chat" },
-	{ id: "notes",   label: "Notes" },
-	{ id: "outputs", label: "Outputs" },
-	{ id: "banters", label: "Banters" },
-	{ id: "media",   label: "Media" },
-	{ id: "music",   label: "Music" },
+const TABS: { id: TabId; label: string; icon: () => string }[] = [
+	{ id: "agents",  label: "Agents",  icon: () => Icons.bot(14) },
+	{ id: "chat",    label: "Chat",    icon: () => Icons.chat(14) },
+	{ id: "notes",   label: "Notes",   icon: () => Icons.notes(14) },
+	{ id: "outputs", label: "Outputs", icon: () => Icons.download(14) },
+	{ id: "banters", label: "Banters", icon: () => Icons.graphics(14) },
+	{ id: "media",   label: "Media",   icon: () => Icons.image(14) },
+	{ id: "music",   label: "Music",   icon: () => Icons.music(14) },
 ];
 
 const COHOST_TABS = new Set<TabId>(["agents", "chat", "notes", "outputs"]);
@@ -64,7 +65,10 @@ export class RightSidebar extends Component<State> {
 		return `
 			<nav class="right-sidebar__tabs" role="tablist" aria-label="Studio tools">
 				${tabs.map((t) => `
-					<button id="right-sidebar-tab-${t.id}" class="right-sidebar__tab${t.id === this.state.active ? " is-active" : ""}" role="tab" aria-selected="${t.id === this.state.active}" aria-controls="right-sidebar-panel" tabindex="${t.id === this.state.active ? "0" : "-1"}" data-tab="${t.id}">${t.label}</button>
+					<button id="right-sidebar-tab-${t.id}" class="right-sidebar__tab${t.id === this.state.active ? " is-active" : ""}" role="tab" aria-selected="${t.id === this.state.active}" aria-controls="right-sidebar-panel" tabindex="${t.id === this.state.active ? "0" : "-1"}" data-tab="${t.id}">
+						<span class="right-sidebar__tab-icon" aria-hidden="true">${t.icon()}</span>
+						<span class="right-sidebar__tab-label">${t.label}</span>
+					</button>
 				`).join("")}
 			</nav>
 			<div id="right-sidebar-panel" class="right-sidebar__body" role="tabpanel" aria-labelledby="right-sidebar-tab-${this.state.active}" data-body></div>

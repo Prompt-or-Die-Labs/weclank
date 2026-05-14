@@ -17,6 +17,8 @@ interface LinkOptions {
 	edit?: RtmpChannel;
 }
 
+const PLATFORM_CHOICES = ["twitch", "youtube", "facebook", "kick", "rumble", "x", "tiktok", "instagram", "linkedin", "pumpfun", "retaketv"] as const satisfies readonly BrandId[];
+
 export function openChannelLinkDialog(options: LinkOptions = {}): Promise<RtmpChannel | null> {
 	return new Promise((resolve) => {
 		let resolved = false;
@@ -38,20 +40,25 @@ export function openChannelLinkDialog(options: LinkOptions = {}): Promise<RtmpCh
 		const renderForm = (): void => {
 			body.innerHTML = `
 				<div class="channel-link__platforms" role="radiogroup" aria-label="Platform">
-					${(["twitch","youtube","facebook","kick","rumble","x","tiktok","instagram","linkedin","pumpfun","retaketv"] as BrandId[]).map((id) => `
+					${PLATFORM_CHOICES.map((id) => {
+						const comingSoon = id === "retaketv";
+						return `
 						<button
 							type="button"
-							class="channel-link__platform${platform === id ? " is-selected" : ""}"
+							class="channel-link__platform${platform === id ? " is-selected" : ""}${comingSoon ? " channel-link__platform--soon" : ""}"
 							data-platform="${id}"
 							role="radio"
 							aria-checked="${platform === id ? "true" : "false"}"
-							aria-label="${BRAND_LABELS[id]}"
+							aria-label="${comingSoon ? `${BRAND_LABELS[id]} coming soon` : BRAND_LABELS[id]}"
 							style="--brand-color: ${BRAND_COLORS[id]};"
+							${comingSoon ? "disabled" : ""}
 						>
-							<span class="channel-link__platform-glyph" aria-hidden="true">${Brands[id](20)}</span>
+							<span class="channel-link__platform-glyph" aria-hidden="true">${brandGlyph(id, 20)}</span>
 							<span class="channel-link__platform-label">${BRAND_LABELS[id]}</span>
+							${comingSoon ? '<span class="channel-link__soon">Coming soon</span>' : ""}
 						</button>
-					`).join("")}
+					`;
+					}).join("")}
 					<button
 						type="button"
 						class="channel-link__platform${platform === "custom" ? " is-selected" : ""}"
@@ -154,4 +161,11 @@ export function openChannelLinkDialog(options: LinkOptions = {}): Promise<RtmpCh
 
 function escapeAttr(s: string): string {
 	return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function brandGlyph(id: BrandId, size: number): string {
+	if (id === "retaketv") {
+		return `<img class="channel-link__platform-logo" src="./assets/retaketv.svg" alt="" width="${size}" height="${size}" />`;
+	}
+	return Brands[id](size);
 }

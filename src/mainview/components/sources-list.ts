@@ -105,7 +105,7 @@ export class SourcesList extends Component<State> {
 	private renderRow(placement: SourcePlacement): string {
 		const p = this.state.participants[placement.participantId];
 		if (!p) return "";
-		const eye = placement.visible ? Icons.fullscreen(12) : Icons.fullscreen(12);
+		const eye = placement.visible ? Icons.eye(12) : Icons.eyeOff(12);
 		const eyeClass = placement.visible ? "is-on" : "is-off";
 		const kindGlyph = kindIcon(p.kind);
 		return `
@@ -190,13 +190,13 @@ export class SourcesList extends Component<State> {
 		const menu = document.createElement("div");
 		menu.className = "menu";
 		menu.innerHTML = `
-			<button class="menu__item" data-act="front">Bring to front</button>
-			<button class="menu__item" data-act="back">Send to back</button>
-			<button class="menu__item" data-act="center">Center on canvas</button>
-			<button class="menu__item" data-act="fit">Fit to canvas</button>
+			<button class="menu__item" data-act="front"><span class="menu__icon" aria-hidden="true">${Icons.expand(14)}</span><span>Bring to front</span></button>
+			<button class="menu__item" data-act="back"><span class="menu__icon" aria-hidden="true">${Icons.minimize(14)}</span><span>Send to back</span></button>
+			<button class="menu__item" data-act="center"><span class="menu__icon" aria-hidden="true">${Icons.layoutSwap(14)}</span><span>Center on canvas</span></button>
+			<button class="menu__item" data-act="fit"><span class="menu__icon" aria-hidden="true">${Icons.fullscreen(14)}</span><span>Fit to canvas</span></button>
 			<div class="menu__divider"></div>
-			<button class="menu__item menu__item--danger" data-act="remove">Remove from scene</button>
-			<button class="menu__item menu__item--danger" data-act="delete">Delete participant</button>
+			<button class="menu__item menu__item--danger" data-act="remove"><span class="menu__icon" aria-hidden="true">${Icons.trash(14)}</span><span>Remove from scene</span></button>
+			<button class="menu__item menu__item--danger" data-act="delete"><span class="menu__icon" aria-hidden="true">${Icons.trash(14)}</span><span>Delete participant</span></button>
 		`;
 		const popover = new Popover({ anchor, content: menu });
 		menu.querySelectorAll<HTMLButtonElement>("[data-act]").forEach((btn) => {
@@ -220,15 +220,15 @@ export class SourcesList extends Component<State> {
 		menu.className = "menu";
 		menu.innerHTML = `
 			<div class="menu__section">Local</div>
-			<button class="menu__item" data-kind="camera">Webcam</button>
-			<button class="menu__item" data-kind="screen">Screen capture</button>
-			<button class="menu__item" data-kind="mic">Microphone</button>
+			<button class="menu__item" data-kind="camera"><span class="menu__icon" aria-hidden="true">${Icons.camera(14)}</span><span>Webcam</span></button>
+			<button class="menu__item" data-kind="screen"><span class="menu__icon" aria-hidden="true">${Icons.screen(14)}</span><span>Screen capture</span></button>
+			<button class="menu__item" data-kind="mic"><span class="menu__icon" aria-hidden="true">${Icons.mic(14)}</span><span>Microphone</span></button>
 			<div class="menu__section">AI co-host</div>
-			<button class="menu__item" data-kind="voice">Voice only</button>
-			<button class="menu__item" data-kind="voice-image">Voice + image</button>
-			<button class="menu__item" data-kind="voice-vrm">Voice + VRM avatar…</button>
-			<button class="menu__item" data-kind="voice-glb">Voice + GLB model…</button>
-			<button class="menu__item" data-kind="text">Text assistant</button>
+			<button class="menu__item" data-kind="voice"><span class="menu__icon" aria-hidden="true">${Icons.bot(14)}</span><span>Voice only</span></button>
+			<button class="menu__item" data-kind="voice-image"><span class="menu__icon" aria-hidden="true">${Icons.image(14)}</span><span>Voice + image</span></button>
+			<button class="menu__item" data-kind="voice-vrm"><span class="menu__icon" aria-hidden="true">${Icons.user(14)}</span><span>Voice + VRM avatar…</span></button>
+			<button class="menu__item" data-kind="voice-glb"><span class="menu__icon" aria-hidden="true">${Icons.layoutSwap(14)}</span><span>Voice + GLB model…</span></button>
+			<button class="menu__item" data-kind="text"><span class="menu__icon" aria-hidden="true">${Icons.notes(14)}</span><span>Text assistant</span></button>
 		`;
 		const popover = new Popover({ anchor, content: menu });
 		menu.querySelectorAll<HTMLButtonElement>("[data-kind]").forEach((btn) => {

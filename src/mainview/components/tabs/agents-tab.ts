@@ -9,6 +9,7 @@
 //   - rolling tool-call log (last few entries with timestamp + outcome)
 
 import { Component } from "../../core/component";
+import { Icons } from "../../core/icons";
 import { studio } from "../../state/studio-store";
 import type { Participant, SourceKind } from "../../core/types";
 import { audioMixer } from "../../streaming/audio-mixer";
@@ -159,12 +160,12 @@ export class AgentsTab extends Component<State> {
 		menu.className = "menu";
 		menu.innerHTML = `
 			<div class="menu__section">Voice co-host</div>
-			<button class="menu__item" data-kind="voice">Voice only</button>
-			<button class="menu__item" data-kind="voice-image">Voice + image</button>
-			<button class="menu__item" data-kind="voice-vrm">Voice + VRM avatar</button>
-			<button class="menu__item" data-kind="voice-glb">Voice + GLB model</button>
+			<button class="menu__item" data-kind="voice"><span class="menu__icon" aria-hidden="true">${Icons.bot(14)}</span><span>Voice only</span></button>
+			<button class="menu__item" data-kind="voice-image"><span class="menu__icon" aria-hidden="true">${Icons.image(14)}</span><span>Voice + image</span></button>
+			<button class="menu__item" data-kind="voice-vrm"><span class="menu__icon" aria-hidden="true">${Icons.user(14)}</span><span>Voice + VRM avatar</span></button>
+			<button class="menu__item" data-kind="voice-glb"><span class="menu__icon" aria-hidden="true">${Icons.layoutSwap(14)}</span><span>Voice + GLB model</span></button>
 			<div class="menu__section">Text assistant</div>
-			<button class="menu__item" data-kind="text">Co-host · Monitor · Producer · Overlay bot…</button>
+			<button class="menu__item" data-kind="text"><span class="menu__icon" aria-hidden="true">${Icons.notes(14)}</span><span>Co-host · Monitor · Producer · Overlay bot…</span></button>
 		`;
 		const popover = new Popover({ anchor, content: menu, placement: "bottom" });
 		menu.querySelectorAll<HTMLButtonElement>("[data-kind]").forEach((btn) => {
