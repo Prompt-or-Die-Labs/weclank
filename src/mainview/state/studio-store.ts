@@ -7,6 +7,7 @@ import { saveToStorage } from "./persistence";
 import { disposeTTSProvider } from "../tts/registry";
 import { banterEngine } from "../banter/banter-engine";
 import { chatOverlay } from "../streaming/chat-overlay";
+import { chatBus, type ChannelMap } from "../chat/chat-bus";
 import { audioMixer } from "../streaming/audio-mixer";
 import { participantId, sceneId, mintId, showSegmentId } from "../core/ids";
 import { PersistenceError } from "../core/errors";
@@ -159,6 +160,7 @@ class StudioStore extends Store<StudioState> {
 		}
 
 		if (restored.overlays?.chat?.enabled) {
+			chatBus.sync(channelMapFor(restored.overlays.chat));
 			chatOverlay.start(restored.overlays.chat);
 		}
 	}
@@ -452,9 +454,10 @@ class StudioStore extends Store<StudioState> {
 
 	setChatOverlay(config: ChatOverlayConfig): void {
 		this.set((s) => ({ overlays: { ...s.overlays, chat: config } }));
-		// Side-effect into the renderer immediately so the overlay reflects
-		// the change without waiting for a restore boot.
-		if (config.enabled && config.channel) chatOverlay.start(config);
+		// Reconcile the bus first so the overlay sees fresh subscriber
+		// state when it (re)starts.
+		chatBus.sync(config.enabled ? channelMapFor(config) : {});
+		if (config.enabled && hasAnyChannel(config)) chatOverlay.start(config);
 		else chatOverlay.stop();
 	}
 
@@ -514,6 +517,21 @@ function defaultStudioPrefs(p?: StudioPrefs): StudioPrefs {
 				? p.mediaLibraryCategories
 				: [...cats],
 	};
+}
+
+/** Build the connector channel map from the chat overlay config. The
+ * legacy `channel` field (always Twitch) is migrated into
+ * `channels.twitch` if the user hasn't already set one explicitly. */
+function channelMapFor(config: ChatOverlayConfig): ChannelMap {
+	const map: ChannelMap = { ...config.channels };
+	if (!map.twitch && config.channel) map.twitch = config.channel;
+	return map;
+}
+
+function hasAnyChannel(config: ChatOverlayConfig): boolean {
+	if (config.channel && config.channel.trim()) return true;
+	const map = config.channels ?? {};
+	return Object.values(map).some((v) => !!v && v.trim().length > 0);
 }
 
 export const studio = new StudioStore();

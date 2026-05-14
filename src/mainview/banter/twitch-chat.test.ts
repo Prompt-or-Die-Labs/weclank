@@ -47,4 +47,13 @@ describe("parsePrivmsg", () => {
 		expect(msg!.timestamp).toBeGreaterThanOrEqual(before);
 		expect(msg!.timestamp).toBeLessThanOrEqual(after);
 	});
+
+	test("extracts message id and user id from tags (for mod actions)", () => {
+		const line = "@id=abc-123;user-id=999;color=#FF0000;display-name=Alice :alice!alice@host PRIVMSG #channel :spam";
+		const msg = parsePrivmsg(line);
+		expect(msg).not.toBeNull();
+		expect(msg!.meta?.["msgId"]).toBe("abc-123");
+		expect(msg!.meta?.["userId"]).toBe("999");
+		expect(msg!.meta?.["color"]).toBe("#FF0000");
+	});
 });

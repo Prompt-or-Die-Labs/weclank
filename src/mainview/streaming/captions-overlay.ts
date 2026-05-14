@@ -17,16 +17,44 @@ const LINGER_MS = 8_000;
 const MAX_LINES = 3;
 const PADDING_BOTTOM = 96;
 
-let enabled = false;
+const ENABLED_KEY = "studio.captions.enabled";
+
+function readPersistedEnabled(): boolean {
+	try {
+		return localStorage.getItem(ENABLED_KEY) === "1";
+	} catch {
+		return false;
+	}
+}
+
+let enabled = readPersistedEnabled();
 let unsubscribe: (() => void) | null = null;
 const lines: CaptionLine[] = [];
+const listeners = new Set<(enabled: boolean) => void>();
+
+if (enabled) {
+	// Persisted-on case: re-subscribe to the mic feed on module init.
+	unsubscribe = micTranscriber.subscribe((text) => {
+		lines.push({ text, at: Date.now() });
+		if (lines.length > MAX_LINES) lines.splice(0, lines.length - MAX_LINES);
+	});
+}
 
 export function isCaptionsEnabled(): boolean {
 	return enabled;
 }
 
+export function subscribeCaptionsEnabled(listener: (enabled: boolean) => void): () => void {
+	listeners.add(listener);
+	return () => { listeners.delete(listener); };
+}
+
 export function setCaptionsEnabled(next: boolean): void {
+	if (enabled === next) return;
 	enabled = next;
+	try {
+		localStorage.setItem(ENABLED_KEY, next ? "1" : "0");
+	} catch { /* unavailable */ }
 	if (next) {
 		if (!unsubscribe) {
 			unsubscribe = micTranscriber.subscribe((text) => {
@@ -39,6 +67,7 @@ export function setCaptionsEnabled(next: boolean): void {
 		unsubscribe = null;
 		lines.length = 0;
 	}
+	for (const listener of listeners) listener(next);
 }
 
 export function drawCaptions(ctx: CanvasRenderingContext2D, w: number, h: number): void {

@@ -116,11 +116,18 @@ export function parsePrivmsg(line: string): ChatMessage | null {
 
 	const nickMatch = rest.match(/^:([^!]+)!/);
 	const author = tags["display-name"] || nickMatch?.[1] || "anon";
+	const meta: Record<string, string> = { channel };
+	// Twitch's IRCv3 tags include `id` (message uuid for /delete) and
+	// `user-id` (numeric user id for /timeout, /ban). Surface them so
+	// the connector can use them for moderation.
+	if (tags["id"]) meta["msgId"] = tags["id"];
+	if (tags["user-id"]) meta["userId"] = tags["user-id"];
+	if (tags["color"]) meta["color"] = tags["color"];
 	return {
 		author,
 		text,
 		timestamp: Date.now(),
-		meta: { channel },
+		meta,
 	};
 }
 

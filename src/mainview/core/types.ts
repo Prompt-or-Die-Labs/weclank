@@ -147,11 +147,43 @@ export interface Scene {
 
 export type StreamQuality = "480p" | "720p" | "1080p";
 
+/** Platforms for which Weclank ships a brand glyph + RTMP preset. "custom"
+ * covers any arbitrary RTMP endpoint. New platforms get added here, in
+ * `core/icons.ts` (BRAND_PATHS / BRAND_COLORS / BRAND_LABELS), and in the
+ * platform-defaults map in `streaming/channels.ts`. */
+export type PlatformId =
+	| "twitch"
+	| "youtube"
+	| "facebook"
+	| "kick"
+	| "rumble"
+	| "x"
+	| "tiktok"
+	| "instagram"
+	| "linkedin"
+	| "custom";
+
+/** A saved RTMP destination tied to a platform. The user can have many
+ * linked channels; the current stream broadcasts to the subset whose ids
+ * are in `StreamConfig.activeChannelIds`. */
+export interface RtmpChannel {
+	id: string;
+	platform: PlatformId;
+	/** User-given display label (e.g. "Main Twitch", "Backup YouTube"). */
+	label: string;
+	rtmpUrl: string;
+	streamKey: string;
+}
+
 export interface StreamConfig {
 	title: string;
 	quality: StreamQuality;
 	recording: boolean;
 	live: boolean;
+	/** Ids of channels selected for the current/next broadcast. Empty means
+	 * "broadcast to every saved channel" (preserves single-destination
+	 * behavior from before channels existed). */
+	activeChannelIds?: string[];
 }
 
 export type ShowSegmentStatus = "upcoming" | "live" | "done";
@@ -208,11 +240,22 @@ export interface MusicTrack {
 	startedAt: number;
 }
 
+/** Platforms whose chat we currently know how to read. Twitch and Kick
+ * are anonymous WebSocket reads. YouTube is OAuth-polling (stub). The
+ * other streaming destinations don't expose public chat APIs. */
+export type ChatPlatformId = "twitch" | "kick" | "youtube";
+
 export interface ChatOverlayConfig {
 	enabled: boolean;
+	/** Legacy field — was the Twitch channel name. Kept for back-compat;
+	 * new code reads `channels.twitch` instead. Migrated on load. */
 	channel: string;
 	position: ChatOverlayPosition;
 	maxMessages: number;
+	/** Per-platform channel identifiers. Each non-empty value spawns a
+	 * connector via ChatBus. Twitch + Kick: lowercase username. YouTube:
+	 * the live video id or channel id (see chat/youtube-connector). */
+	channels?: Partial<Record<ChatPlatformId, string>>;
 }
 
 export interface StudioOverlays {

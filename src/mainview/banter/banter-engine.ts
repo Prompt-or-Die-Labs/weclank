@@ -22,8 +22,8 @@
 
 import { anyHumanSpeaking } from "./vad";
 import { LLMClient, type ChatTurn } from "./llm-client";
-import { TwitchChatSource } from "./twitch-chat";
-import type { ChatSource, ChatMessage } from "./chat-source";
+import type { ChatMessage } from "./chat-source";
+import { chatBus } from "../chat/chat-bus";
 import { runAgentToolLoop, type AgentToolCallRecord } from "./agent-turn";
 import { runtimeAutonomy, runtimeToolPermissions } from "./tool-policy";
 import { studio } from "../state/studio-store";
@@ -70,7 +70,7 @@ const VISION_PREVIEW_MIN_INTERVAL_MS = 15_000;
 
 class BanterSession {
 	private aborted = false;
-	private chatSource: ChatSource | null = null;
+	private chatUnsubscribe: (() => void) | null = null;
 	private llm: LLMClient;
 	private history: ChatTurn[] = [];
 	private lastReplyAt = 0;
@@ -136,26 +136,17 @@ class BanterSession {
 			});
 			this.unsubscribeMic = micTranscriber.subscribe((text) => this.onHostUtterance(text));
 		}
-		if (!this.config.twitchChannel) {
-			// No chat source — idle loop still runs if proactive is on,
-			// so we don't return early. Just nothing to iterate.
-			return;
-		}
-		this.chatSource = new TwitchChatSource(this.config.twitchChannel);
-		try {
-			await this.chatSource.connect();
-		} catch (err) {
-			console.error("[banter] chat source failed to connect", err);
-			return;
-		}
-
-		for await (const msg of this.chatSource.messages()) {
-			if (this.aborted) break;
-			if (!this.shouldRespond(msg)) continue;
-			// Detach the response from the iterator loop — one slow LLM
-			// call shouldn't block the next message from being seen.
+		// Subscribe to the shared ChatBus rather than spinning up our own
+		// connection. The bus is already running with whatever per-platform
+		// channels the chat overlay config specifies, so every agent sees
+		// every platform without duplicating sockets.
+		this.chatUnsubscribe = chatBus.subscribe((msg) => {
+			if (this.aborted) return;
+			if (!this.shouldRespond(msg)) return;
+			// Detach the response so one slow LLM call doesn't block other
+			// messages from triggering their own respond pipelines.
 			void this.respond(msg);
-		}
+		});
 	}
 
 	stop(): void {
@@ -166,8 +157,8 @@ class BanterSession {
 		this.idleTimer = null;
 		this.unsubscribeMic?.();
 		this.unsubscribeMic = null;
-		this.chatSource?.disconnect();
-		this.chatSource = null;
+		this.chatUnsubscribe?.();
+		this.chatUnsubscribe = null;
 	}
 
 	/** Transcribed utterance from the host's mic — feed into the same

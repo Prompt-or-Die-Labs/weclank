@@ -74,9 +74,15 @@ export function pickChatOverlayConfig(initial?: ChatOverlayConfig): Promise<Chat
 
 		body.querySelector<HTMLButtonElement>("[data-action=cancel]")!.addEventListener("click", () => modal.close());
 		body.querySelector<HTMLButtonElement>("[data-action=save]")!.addEventListener("click", () => {
+			const twitchValue = channel.value.trim();
+			// Mirror the legacy `channel` field into `channels.twitch` so
+			// the multi-platform ChatTab and ChatBus pick it up. Preserve
+			// any other-platform channels the user set elsewhere.
+			const previousChannels = initial?.channels ?? {};
 			const cfg: ChatOverlayConfig = {
 				enabled: enabled.checked,
-				channel: channel.value.trim(),
+				channel: twitchValue,
+				channels: { ...previousChannels, twitch: twitchValue || undefined },
 				position: position.value as ChatOverlayPosition,
 				maxMessages: Math.max(2, Math.min(12, Number(maxMessages.value) || DEFAULT_OVERLAY.maxMessages)),
 			};

@@ -6,7 +6,11 @@ import type { StreamQuality } from "../core/types";
 import { createParticipantFromKind } from "../state/source-factory";
 import { studio } from "../state/studio-store";
 import { localRecorder } from "../streaming/recorder";
-import { getSavedRtmpDestinationCount, pickRtmpDestination } from "../streaming/rtmp-config-dialog";
+import { pickRtmpDestination } from "../streaming/rtmp-config-dialog";
+import { loadChannels, removeChannel } from "../streaming/channels";
+import { openChannelLinkDialog } from "../streaming/channel-link-dialog";
+import { Brands, BRAND_COLORS, BRAND_LABELS } from "../core/icons";
+import type { BrandId } from "../core/icons";
 import { bunRpc } from "../rpc";
 import { PRODUCT_PROMISE, PRODUCT_TAGLINE } from "../product";
 import { getTheme, setTheme, type ThemeMode } from "./theme";
@@ -43,6 +47,15 @@ export function openSettingsDialog(): void {
 			if (result) toast(`${result.destinations.length} channel${result.destinations.length === 1 ? "" : "s"} saved`, "success");
 		});
 	});
+	body.querySelector<HTMLButtonElement>("[data-action=link-channel]")?.addEventListener("click", () => {
+		void openChannelLinkDialog().then((created) => {
+			if (created) {
+				toast(`${BRAND_LABELS[created.platform as BrandId] ?? "Custom"} channel linked`, "success");
+				wireChannelsList(body);
+			}
+		});
+	});
+	wireChannelsList(body);
 	body.querySelector<HTMLButtonElement>("[data-action=record]")?.addEventListener("click", () => void toggleRecording());
 	body.querySelector<HTMLButtonElement>("[data-action=screen]")?.addEventListener("click", () => {
 		void createParticipantFromKind("screen")
@@ -96,7 +109,6 @@ export function openSettingsDialog(): void {
 }
 
 function renderSettings(): string {
-	const destinationCount = getSavedRtmpDestinationCount();
 	const theme = getTheme();
 	const quality = studio.state.stream.quality;
 	const openRouterConnected = hasSecret(OPENROUTER_KEY);
@@ -130,7 +142,7 @@ function renderSettings(): string {
 		<section class="settings-section">
 			<div class="settings-section__head">
 				<h3>Stream Channels</h3>
-				<p>${destinationCount} saved RTMP channel${destinationCount === 1 ? "" : "s"}. Add Twitch, YouTube, Facebook, Kick, or any custom ingest URL.</p>
+				<p>Link Twitch, YouTube, Facebook, Kick, and other RTMP destinations. Toggle which channels broadcast for the next stream from the header strip.</p>
 			</div>
 			<div class="settings-row">
 				<label>
@@ -141,7 +153,13 @@ function renderSettings(): string {
 						<option value="1080p"${quality === "1080p" ? " selected" : ""}>1080p · max quality</option>
 					</select>
 				</label>
-				<button type="button" class="settings-action" data-action="rtmp">Manage RTMP channels</button>
+			</div>
+			<div class="channels-list" data-channels-list>
+				${renderChannelsList()}
+			</div>
+			<div class="settings-grid settings-grid--two">
+				<button type="button" class="settings-action" data-action="link-channel">Link a channel…</button>
+				<button type="button" class="settings-action" data-action="rtmp">Legacy: bulk-edit RTMP rows…</button>
 			</div>
 		</section>
 
@@ -249,6 +267,63 @@ function renderSettings(): string {
 			<button type="button" data-action="close" class="primary">Done</button>
 		</div>
 	`;
+}
+
+function renderChannelsList(): string {
+	const channels = loadChannels();
+	if (channels.length === 0) {
+		return '<p class="channels-list__empty">No channels linked yet. Click <strong>Link a channel</strong> to add one.</p>';
+	}
+	return channels.map((c) => {
+		const brand = c.platform !== "custom" ? c.platform as BrandId : null;
+		const glyph = brand ? Brands[brand](16) : "";
+		const color = brand ? BRAND_COLORS[brand] : "var(--text-2)";
+		const platformLabel = brand ? BRAND_LABELS[brand] : "Custom";
+		return `
+			<div class="channels-list__row" data-channel-id="${escapeAttr(c.id)}">
+				<span class="channels-list__glyph" style="color: ${color};" aria-hidden="true">${glyph}</span>
+				<div class="channels-list__meta">
+					<span class="channels-list__platform">${platformLabel}</span>
+					<span class="channels-list__label">${escapeHtml(c.label || platformLabel)}</span>
+				</div>
+				<button type="button" class="channels-list__btn" data-action="edit-channel" data-id="${escapeAttr(c.id)}">Edit</button>
+				<button type="button" class="channels-list__btn channels-list__btn--danger" data-action="remove-channel" data-id="${escapeAttr(c.id)}">Remove</button>
+			</div>
+		`;
+	}).join("");
+}
+
+function wireChannelsList(body: HTMLElement): void {
+	const host = body.querySelector<HTMLElement>("[data-channels-list]");
+	if (!host) return;
+	host.innerHTML = renderChannelsList();
+	host.querySelectorAll<HTMLButtonElement>("[data-action=edit-channel]").forEach((btn) => {
+		btn.addEventListener("click", async () => {
+			const id = btn.dataset["id"];
+			const channel = loadChannels().find((c) => c.id === id);
+			if (!channel) return;
+			const updated = await openChannelLinkDialog({ edit: channel });
+			if (updated) {
+				toast("Channel updated", "success");
+				wireChannelsList(body);
+			}
+		});
+	});
+	host.querySelectorAll<HTMLButtonElement>("[data-action=remove-channel]").forEach((btn) => {
+		btn.addEventListener("click", async () => {
+			const id = btn.dataset["id"];
+			if (!id) return;
+			const channel = loadChannels().find((c) => c.id === id);
+			if (!channel) return;
+			if (!window.confirm(`Remove "${channel.label || channel.platform}"?`)) return;
+			await removeChannel(id);
+			// Drop the id from the active selection too.
+			const next = (studio.state.stream.activeChannelIds ?? []).filter((cid) => cid !== id);
+			studio.setStream({ activeChannelIds: next });
+			toast("Channel removed");
+			wireChannelsList(body);
+		});
+	});
 }
 
 async function copyProgramState(): Promise<void> {

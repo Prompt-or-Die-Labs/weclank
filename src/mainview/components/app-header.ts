@@ -13,11 +13,14 @@ import { openOpenAiApiKeyDialog, OPENAI_API_KEY } from "../auth/openai-api";
 import { hasSecret } from "../auth/secrets-cache";
 import { egressController } from "../streaming/egress";
 import { pickRtmpDestination } from "../streaming/rtmp-config-dialog";
+import { loadChannels, resolveActiveChannels } from "../streaming/channels";
+import { openChannelLinkDialog } from "../streaming/channel-link-dialog";
 import { localRecorder } from "../streaming/recorder";
 import { StudioError, userMessageFor } from "../core/errors";
 import { bunRpc } from "../rpc";
 import { openGoLiveFailedDialog } from "./go-live-failed-dialog";
 import { openSettingsDialog } from "./settings-dialog";
+import { ChannelStrip } from "./channel-strip";
 
 interface State {
 	stream: StudioState["stream"];
@@ -42,6 +45,7 @@ const UTILITY_ITEMS: Array<{ kind: UtilityKind; label: string }> = [
 
 export class AppHeader extends Component<State> {
 	private tickTimer: ReturnType<typeof setInterval> | null = null;
+	private channelStrip: ChannelStrip | null = null;
 
 	constructor() {
 		super({
@@ -63,14 +67,30 @@ export class AppHeader extends Component<State> {
 
 	protected afterMount(): void {
 		this.el.setAttribute("role", "banner");
+		this.mountChannels();
 		// Tick the displayed elapsed time once a second while live.
 		this.tickTimer = setInterval(() => {
 			if (this.state.liveStartedAt !== null) this.setState({ nowMs: Date.now() });
 		}, 1000);
 	}
 
+	protected update(): void {
+		super.update();
+		this.mountChannels();
+	}
+
 	protected beforeDestroy(): void {
 		if (this.tickTimer) clearInterval(this.tickTimer);
+		this.channelStrip?.destroy();
+		this.channelStrip = null;
+	}
+
+	private mountChannels(): void {
+		const host = this.$<HTMLElement>("[data-channels-mount]");
+		if (!host) return;
+		this.channelStrip?.destroy();
+		this.channelStrip = new ChannelStrip();
+		this.channelStrip.mount(host);
 	}
 
 	protected rootClass(): string {
@@ -94,6 +114,7 @@ export class AppHeader extends Component<State> {
 			<div class="app-header__right">
 				${stream.recording ? `<span class="rec-badge" aria-label="Recording to disk">REC</span>` : ""}
 				${elapsed ? `<span class="stream-timer tabular" aria-label="Time live">${elapsed}</span>` : ""}
+				<div class="app-header__channels" data-channels-mount></div>
 				<button class="utilities-btn" id="utilities-menu" aria-label="Open utility windows">Utilities</button>
 				<button class="rec-btn ${stream.recording ? "rec-btn--on" : ""}" id="rec-toggle" aria-label="${stream.recording ? "Stop recording to disk" : "Start recording to disk"}" aria-pressed="${stream.recording ? "true" : "false"}">${stream.recording ? "STOP" : "REC"}</button>
 				<button class="stream-status" id="stream-status" aria-label="Stream settings">
@@ -266,22 +287,42 @@ export class AppHeader extends Component<State> {
 	}
 
 	private async toggleLive(): Promise<void> {
-		const current = studio.state.stream.live;
-		if (!current) {
-			const result = await pickRtmpDestination();
-			if (!result) return;
-			toast(`Connecting to ${result.destinations.length} destination${result.destinations.length > 1 ? "s" : ""}…`, "info");
-			try {
-				await egressController.start(result.destinations);
-				studio.setStream({ live: true });
-				toast(`Live on ${result.destinations.length} destination${result.destinations.length > 1 ? "s" : ""}`, "success");
-			} catch (err) {
-				const detail = err instanceof StudioError ? err.message : userMessageFor(err);
-				openGoLiveFailedDialog(detail);
-			}
-		} else {
+		if (studio.state.stream.live) {
 			egressController.stop();
 			toast("Stream stopped");
+			return;
+		}
+		// `loadChannels()` migrates legacy `rtmp_destinations` in-memory, so a
+		// user with old destinations sees them surface as channels here.
+		const channels = loadChannels();
+		if (channels.length === 0) {
+			// First-time path — link a channel, then go live to it.
+			const created = await openChannelLinkDialog();
+			if (!created) return;
+			studio.setStream({ activeChannelIds: [created.id] });
+			return void this.startEgress([{ rtmpUrl: created.rtmpUrl, streamKey: created.streamKey }]);
+		}
+		const targets = resolveActiveChannels(studio.state.stream.activeChannelIds);
+		if (targets.length === 0) {
+			toast("Pick at least one channel in the header strip", "error");
+			return;
+		}
+		// Multi-destination: ffmpeg's tee muxer fans the same encode out
+		// to every channel in one process. Twitch + X + YouTube + … all
+		// share the encode cost.
+		await this.startEgress(targets.map(({ rtmpUrl, streamKey }) => ({ rtmpUrl, streamKey })));
+	}
+
+	private async startEgress(destinations: { rtmpUrl: string; streamKey: string }[]): Promise<void> {
+		const count = destinations.length;
+		toast(`Connecting to ${count} destination${count > 1 ? "s" : ""}…`, "info");
+		try {
+			await egressController.start(destinations);
+			studio.setStream({ live: true });
+			toast(`Live on ${count} destination${count > 1 ? "s" : ""}`, "success");
+		} catch (err) {
+			const detail = err instanceof StudioError ? err.message : userMessageFor(err);
+			openGoLiveFailedDialog(detail);
 		}
 	}
 

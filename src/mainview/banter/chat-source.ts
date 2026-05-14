@@ -2,11 +2,22 @@
 // implementation pushes messages onto an async iterator; the engine awaits
 // them and decides whether to respond.
 
+import type { ChatPlatformId } from "../core/types";
+
 export interface ChatMessage {
 	author: string;
 	text: string;
 	timestamp: number;
-	/** Free-form metadata (channel name, badges, etc.). */
+	/** Platform this message came from. Stable across the message's life;
+	 * used by the chat tab to render platform badges and route mod
+	 * actions. Optional for back-compat with legacy injected messages. */
+	platform?: ChatPlatformId;
+	/** Stable id assigned by the platform (Twitch's `tags.id`, Kick's
+	 * message UUID, YouTube's commentId). Required for mod actions. */
+	messageId?: string;
+	/** Stable id of the author on the platform — for ban/timeout. */
+	authorId?: string;
+	/** Free-form metadata (channel name, badges, color, etc.). */
 	meta?: Record<string, string>;
 }
 

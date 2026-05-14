@@ -1,15 +1,15 @@
-// In-stream Twitch chat overlay. Composited on top of the participant tiles
-// inside StreamEngine's draw loop, so the overlay reaches the broadcast
-// only — the local preview tiles are independent DOM elements.
+// In-stream multi-platform chat overlay. Composited on top of the
+// participant tiles inside StreamEngine's draw loop, so the overlay
+// reaches the broadcast only — the local preview tiles are independent
+// DOM elements.
 //
-// We hold a fixed-size ring of recent ChatMessages plus a few drawing
-// constants. Twitch's per-user color comes through as the `color` tag
-// when available; missing → derived from a hash of the username so two
-// users don't share the same color very often.
+// Reads messages from ChatBus (one shared queue per renderer). The
+// overlay just holds a small recent-message window and draws it. Bus
+// synchronization (which connectors are running) happens in studio-store
+// when state.overlays.chat changes.
 
-import type { ChatMessage, ChatSource } from "../banter/chat-source";
-import { TwitchChatSource } from "../banter/twitch-chat";
-import { audienceIntelligence } from "../banter/audience-intelligence";
+import type { ChatMessage } from "../banter/chat-source";
+import { chatBus } from "../chat/chat-bus";
 import type { ChatOverlayConfig, ChatOverlayPosition } from "../core/types";
 
 const PADDING = 32;
@@ -20,37 +20,31 @@ const FONT = '500 16px -apple-system, "Inter", system-ui, sans-serif';
 const HEADER_FONT = '600 12px -apple-system, "Inter", system-ui, sans-serif';
 
 class ChatOverlay {
-	private source: ChatSource | null = null;
 	private config: ChatOverlayConfig | null = null;
 	private messages: ChatMessage[] = [];
+	private unsubscribe: (() => void) | null = null;
 
 	start(config: ChatOverlayConfig): void {
-		// Idempotent: same channel + enabled = no-op. Different channel =
-		// reconnect.
-		const changedChannel = !this.config || this.config.channel !== config.channel;
 		this.config = config;
-		if (!config.enabled || !config.channel) {
-			this.stop();
+		// Bus sync happens in studio-store on state changes; the overlay
+		// just decides whether to render. Subscribe once for the lifetime
+		// of the overlay so reconfigures don't churn listeners.
+		if (!this.unsubscribe) {
+			this.unsubscribe = chatBus.subscribe((msg) => this.ingest(msg));
+		}
+		if (!config.enabled) {
+			this.messages = [];
 			return;
 		}
-		if (!this.source || changedChannel) {
-			this.source?.disconnect();
-			this.messages = [];
-			audienceIntelligence.clear();
-			this.source = new TwitchChatSource(config.channel);
-			this.source.connect().catch((err) => {
-				console.warn("[chat-overlay] failed to connect", err);
-				this.source = null;
-			});
-			void this.consume();
-		}
+		// Seed with whatever the bus already has so a late `enable` shows
+		// recent backlog instead of an empty panel.
+		this.messages = chatBus.getHistory(config.maxMessages);
 	}
 
 	stop(): void {
-		this.source?.disconnect();
-		this.source = null;
+		this.unsubscribe?.();
+		this.unsubscribe = null;
 		this.messages = [];
-		audienceIntelligence.clear();
 	}
 
 	updatePosition(position: ChatOverlayPosition): void {
@@ -64,42 +58,37 @@ class ChatOverlay {
 		return this.messages.slice();
 	}
 
-	/** True when a Twitch source is connected (regardless of whether
-	 * messages have arrived). */
+	/** True when at least one platform connector reports connected state. */
 	isConnected(): boolean {
-		return this.source !== null;
+		return chatBus.isConnected();
 	}
 
 	getConfig(): ChatOverlayConfig | null {
 		return this.config;
 	}
 
-	/** Push a synthetic message into the overlay (local chat-input panel).
-	 * Works even when no Twitch source is connected — useful for testing. */
+	/** Push a synthetic message into the overlay. Goes through the bus so
+	 * every subscriber sees it. */
 	inject(msg: ChatMessage): void {
-		this.messages.push(msg);
-		audienceIntelligence.recordMessage(msg);
-		const cap = this.config?.maxMessages ?? 6;
-		if (this.messages.length > cap) this.messages = this.messages.slice(-cap);
+		chatBus.inject(msg);
 	}
 
-	private async consume(): Promise<void> {
-		const source = this.source;
-		if (!source) return;
-		for await (const msg of source.messages()) {
-			if (this.source !== source) break; // we reconnected elsewhere
-			this.messages.push(msg);
-			audienceIntelligence.recordMessage(msg);
-			const cap = this.config?.maxMessages ?? 6;
-			if (this.messages.length > cap) this.messages = this.messages.slice(-cap);
-		}
+	private ingest(msg: ChatMessage): void {
+		this.messages.push(msg);
+		const cap = this.config?.maxMessages ?? 6;
+		if (this.messages.length > cap) this.messages = this.messages.slice(-cap);
 	}
 
 	/** Called by StreamEngine each composite frame. Bail fast when off so
 	 * we don't pay for measureText on idle frames. */
 	draw(ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number): void {
 		const config = this.config;
-		if (!config?.enabled || !config.channel) return;
+		if (!config?.enabled) return;
+		// Render only when at least one connector is configured. The
+		// legacy `channel` field counts; new code also populates
+		// `channels.<platform>` entries.
+		const hasAny = !!config.channel || hasAnyChannel(config);
+		if (!hasAny) return;
 		if (this.messages.length === 0) return;
 
 		const panelWidth = Math.min(560, Math.max(320, canvasWidth * 0.32));
@@ -122,7 +111,7 @@ class ChatOverlay {
 		ctx.font = HEADER_FONT;
 		ctx.textAlign = "left";
 		ctx.textBaseline = "top";
-		ctx.fillText(`#${config.channel} · LIVE CHAT`, x + PANEL_PADDING, y + PANEL_PADDING);
+		ctx.fillText(headerLabel(config), x + PANEL_PADDING, y + PANEL_PADDING);
 
 		// Messages
 		ctx.font = FONT;
@@ -202,6 +191,22 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 	ctx.arcTo(x, y + h, x, y, r);
 	ctx.arcTo(x, y, x + w, y, r);
 	ctx.closePath();
+}
+
+function hasAnyChannel(config: ChatOverlayConfig): boolean {
+	const map = config.channels;
+	if (!map) return false;
+	return Object.values(map).some((v) => !!v && v.length > 0);
+}
+
+function headerLabel(config: ChatOverlayConfig): string {
+	const map = config.channels ?? {};
+	const labels: string[] = [];
+	if (map.twitch || config.channel) labels.push(`#${map.twitch || config.channel}`);
+	if (map.kick) labels.push(`kick/${map.kick}`);
+	if (map.youtube) labels.push("YouTube");
+	const prefix = labels.length > 0 ? `${labels.join(" · ")} · ` : "";
+	return `${prefix}LIVE CHAT`;
 }
 
 export const chatOverlay = new ChatOverlay();

@@ -27,6 +27,23 @@ import { centerPlacement, fitPlacement } from "../state/scene-composition";
 interface State {
 	scene: Scene;
 	participants: Record<string, Participant>;
+	collapsed: boolean;
+}
+
+const SOURCES_COLLAPSED_KEY = "studio.sourcesList.collapsed";
+
+function readSourcesCollapsed(): boolean {
+	try {
+		return localStorage.getItem(SOURCES_COLLAPSED_KEY) === "1";
+	} catch {
+		return false;
+	}
+}
+
+function writeSourcesCollapsed(value: boolean): void {
+	try {
+		localStorage.setItem(SOURCES_COLLAPSED_KEY, value ? "1" : "0");
+	} catch { /* unavailable */ }
 }
 
 export class SourcesList extends Component<State> {
@@ -36,6 +53,7 @@ export class SourcesList extends Component<State> {
 		super({
 			scene: studio.activeScene,
 			participants: studio.state.participants,
+			collapsed: readSourcesCollapsed(),
 		});
 		studio.select(
 			(s) => s.scenes.find((sc) => sc.id === s.activeSceneId),
@@ -48,18 +66,35 @@ export class SourcesList extends Component<State> {
 	}
 
 	protected rootClass(): string {
-		return "sources-list";
+		return "scene-panel__section scene-panel__section--sources sources-list";
+	}
+
+	protected update(): void {
+		this.el.classList.toggle("is-collapsed", this.state.collapsed);
+		this.el.classList.toggle("sources-list--collapsed", this.state.collapsed);
+		super.update();
+	}
+
+	protected afterMount(): void {
+		this.el.classList.toggle("is-collapsed", this.state.collapsed);
+		this.el.classList.toggle("sources-list--collapsed", this.state.collapsed);
+		this.el.setAttribute("role", "region");
+		this.el.setAttribute("aria-label", "Sources in the active scene");
 	}
 
 	protected template(): string {
 		// Render TOP of canvas = top of list, so reverse iterate the array.
 		const rows = [...this.state.scene.sources].reverse();
+		const collapsed = this.state.collapsed;
 		return `
-			<div class="sources-list__head">
-				<span class="section-header">Sources</span>
-				<button class="sources-list__add" data-action="add" title="Add source" aria-label="Add source">${Icons.plus(12)}</button>
+			<div class="scene-panel__head sources-list__head">
+				<button class="scene-panel__head-toggle sources-list__head-toggle" data-sources-toggle type="button" aria-expanded="${collapsed ? "false" : "true"}" aria-controls="sources-list-body">
+					<span class="scene-panel__chevron sources-list__chevron" aria-hidden="true">${Icons.chevronDown(12)}</span>
+					<span class="section-header">Sources</span>
+				</button>
+				<button class="scene-panel__add sources-list__add" data-sources-add type="button" title="Add source" aria-label="Add source">${Icons.plus(12)}</button>
 			</div>
-			<div class="sources-list__items" data-items>
+			<div class="sources-list__items" id="sources-list-body" data-items${collapsed ? ' hidden=""' : ""}>
 				${rows.length === 0
 					? '<div class="sources-list__empty">No sources yet. Click <strong>+</strong> to add one.</div>'
 					: rows.map((s) => this.renderRow(s)).join("")}
@@ -86,15 +121,20 @@ export class SourcesList extends Component<State> {
 		`;
 	}
 
-	protected afterMount(): void {
-		this.el.setAttribute("role", "region");
-		this.el.setAttribute("aria-label", "Sources in the active scene");
-	}
-
 	protected bind(): void {
-		this.on(this.$('[data-action="add"]'), "click", (e) =>
-			this.openAddMenu(e.currentTarget as HTMLElement),
-		);
+		this.on(this.$("[data-sources-toggle]"), "click", () => {
+			const next = !this.state.collapsed;
+			writeSourcesCollapsed(next);
+			this.setState({ collapsed: next });
+		});
+		this.on(this.$("[data-sources-add]"), "click", (e) => {
+			e.stopPropagation();
+			if (this.state.collapsed) {
+				writeSourcesCollapsed(false);
+				this.setState({ collapsed: false });
+			}
+			this.openAddMenu(e.currentTarget as HTMLElement);
+		});
 		for (const row of this.$$<HTMLElement>("[data-pid]")) {
 			const raw = row.dataset["pid"];
 			if (!raw) continue;
