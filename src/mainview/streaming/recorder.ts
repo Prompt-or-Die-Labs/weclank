@@ -56,7 +56,7 @@ class LocalRecorder {
 		return this.isRecording ? Date.now() - this.startedAt : 0;
 	}
 
-	async start(): Promise<void> {
+	async start(): Promise<boolean> {
 		if (this.session || this.starting) {
 			throw new AudioError("Recording already running", "Stop the current recording first.");
 		}
@@ -76,7 +76,7 @@ class LocalRecorder {
 				result = await bunRpc.startRecordingFile({ suggestedName });
 			}
 			if (!result.success) {
-				if (result.reason === "canceled") return;
+				if (result.reason === "canceled") return false;
 				throw new IpcError(
 					result.error ?? "unknown",
 					`Couldn't start recording: ${result.error ?? "no detail"}`,
@@ -107,6 +107,7 @@ class LocalRecorder {
 			session = { capture, writeChain: Promise.resolve(), chunkError: null, acceptingChunks: true };
 			this.session = session;
 			studio.setStream({ recording: true });
+			return true;
 		} catch (err) {
 			if (diskSessionOpen) {
 				await bunRpc.cancelRecordingFile({}).catch(() => {});
@@ -122,9 +123,13 @@ class LocalRecorder {
 		const session = this.session;
 		this.session = null;
 		studio.setStream({ recording: false });
-		if (!session) return;
+		if (!session) {
+			toast("No active recording to save", "info");
+			return;
+		}
 
 		this.finalizing = true;
+		toast("Saving recording...", "info");
 		void this.finalize(session)
 			.finally(() => {
 				this.finalizing = false;
@@ -145,6 +150,7 @@ class LocalRecorder {
 			const result = await bunRpc.finishRecordingFile({});
 			if (result.success && result.path) {
 				savedPath = result.path;
+				toast(`Recording saved to ${savedPath}`, "success");
 				return;
 			}
 			if (result.reason === "canceled") {

@@ -344,7 +344,8 @@ async function toggleRecording(): Promise<void> {
 		return;
 	}
 	try {
-		await localRecorder.start();
+		const started = await localRecorder.start();
+		if (!started) return;
 		toast("Recording started", "success");
 	} catch (err) {
 		toast(`Recording failed: ${userMessageFor(err)}`, "error");

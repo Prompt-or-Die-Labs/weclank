@@ -48,12 +48,32 @@ export function startBroadcastCapture(args: {
 function stopRecorder(recorder: MediaRecorder): Promise<void> {
 	if (recorder.state === "inactive") return Promise.resolve();
 	return new Promise<void>((resolve) => {
-		recorder.addEventListener("stop", () => resolve(), { once: true });
+		let stopped = false;
+		let dataAvailable = false;
+		let fallback: ReturnType<typeof setTimeout> | null = null;
+		const finish = (): void => {
+			if (fallback) clearTimeout(fallback);
+			recorder.removeEventListener("dataavailable", onDataAvailable);
+			resolve();
+		};
+		const maybeFinish = (): void => {
+			if (stopped && dataAvailable) finish();
+		};
+		const onDataAvailable = (): void => {
+			dataAvailable = true;
+			maybeFinish();
+		};
+		recorder.addEventListener("dataavailable", onDataAvailable, { once: true });
+		recorder.addEventListener("stop", () => {
+			stopped = true;
+			fallback = setTimeout(finish, 500);
+			maybeFinish();
+		}, { once: true });
 		try {
 			recorder.requestData();
 			recorder.stop();
 		} catch {
-			resolve();
+			finish();
 		}
 	});
 }

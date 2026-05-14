@@ -639,7 +639,8 @@ export class ProducerTray extends Component<State> {
 			return;
 		}
 		try {
-			await localRecorder.start();
+			const started = await localRecorder.start();
+			if (!started) return;
 			toast("Recording", "success");
 		} catch (err) {
 			toast(`Record toggle failed: ${userMessageFor(err)}`, "error");

@@ -96,7 +96,8 @@ export class BroadcastSection extends Component<State> {
 		const recording = this.state.stream.recording || localRecorder.isRecording;
 		if (recording) { localRecorder.stop(); return; }
 		try {
-			await localRecorder.start();
+			const started = await localRecorder.start();
+			if (!started) return;
 			toast("Recording to disk", "success");
 		} catch (err) {
 			toast(`Recording failed: ${userMessageFor(err)}`, "error");

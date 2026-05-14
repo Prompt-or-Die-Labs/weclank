@@ -335,7 +335,8 @@ export class AppHeader extends Component<State> {
 			return;
 		}
 		try {
-			await localRecorder.start();
+			const started = await localRecorder.start();
+			if (!started) return;
 			toast("Recording to disk", "success");
 		} catch (err) {
 			toast(`Recording failed: ${userMessageFor(err)}`, "error");
