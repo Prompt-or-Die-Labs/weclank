@@ -2107,6 +2107,7 @@ input, textarea, select { font: inherit; }
 }
 .tab-outputs__chapters,
 .tab-outputs__clips,
+.tab-outputs__shorts,
 .tab-outputs__posts {
 	display: flex;
 	flex-direction: column;
@@ -2167,6 +2168,57 @@ input, textarea, select { font: inherit; }
 	line-height: 1.3;
 }
 .tab-outputs__clip span {
+	color: var(--text-2);
+	font-size: 11px;
+	line-height: 1.35;
+}
+.tab-outputs__short {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	padding: 8px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-1);
+}
+.tab-outputs__short-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 8px;
+}
+.tab-outputs__short-head strong {
+	color: var(--text-0);
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.3;
+}
+.tab-outputs__short-head em {
+	color: var(--accent);
+	font-family: var(--font-mono);
+	font-size: 13px;
+	font-style: normal;
+	font-weight: 650;
+	line-height: 1;
+}
+.tab-outputs__virality,
+.tab-outputs__short-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px;
+}
+.tab-outputs__virality span,
+.tab-outputs__short-meta span {
+	padding: 3px 6px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-2);
+	font-family: var(--font-mono);
+	font-size: 9px;
+	text-transform: uppercase;
+}
+.tab-outputs__short p {
+	margin: 0;
 	color: var(--text-2);
 	font-size: 11px;
 	line-height: 1.35;
@@ -4579,6 +4631,26 @@ input, textarea, select { font: inherit; }
 .recording-review__trim-row input[type="number"] {
 	font-family: var(--font-mono);
 	font-size: 12px;
+}
+.recording-review__short {
+	display: grid;
+	grid-template-columns: 116px minmax(0, 1fr);
+	align-items: center;
+	gap: var(--space-2);
+	margin-bottom: var(--space-2);
+}
+.recording-review__short .recording-review__label {
+	margin: 0;
+}
+.recording-review__short select {
+	min-width: 0;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-1);
+	color: var(--text-0);
+	font: inherit;
+	font-size: 12px;
+	padding: 6px 8px;
 }
 .recording-review__hint {
 	font-size: 12px;

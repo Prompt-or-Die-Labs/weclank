@@ -9,6 +9,10 @@ import {
 	generateStreamAnalytics,
 	type StreamAnalytics,
 } from "../../producer/stream-analytics";
+import {
+	generateShortFormPackage,
+	type ShortFormPackage,
+} from "../../producer/shortform";
 import { studio } from "../../state/studio-store";
 import { transcriptFeed } from "../../transcript/feed";
 import { toast } from "../overlays";
@@ -17,6 +21,7 @@ import { escapeHtml } from "../primitives";
 interface State {
 	output: PostStreamOutput;
 	analytics: StreamAnalytics;
+	shortForm: ShortFormPackage;
 }
 
 export class OutputsTab extends Component<State> {
@@ -54,6 +59,7 @@ export class OutputsTab extends Component<State> {
 			${this.renderSection("Summary", this.state.output.summary)}
 			${this.renderAnalytics()}
 			${this.renderTopicEngagement()}
+			${this.renderShortForm()}
 			${this.renderChapters()}
 			${this.renderClips()}
 			${this.renderSection("Unanswered questions", this.state.output.unansweredQuestions)}
@@ -176,6 +182,41 @@ export class OutputsTab extends Component<State> {
 		`;
 	}
 
+	private renderShortForm(): string {
+		return `
+			<section class="tab-outputs__section">
+				<div class="section-header">Short-form package</div>
+				${this.state.shortForm.clips.length === 0
+					? '<div class="tab-outputs__empty">No short-form plan yet.</div>'
+					: `<div class="tab-outputs__shorts">
+						${this.state.shortForm.clips.map((clip) => `
+							<article class="tab-outputs__short">
+								<div class="tab-outputs__short-head">
+									<strong>${escapeHtml(clip.title)}</strong>
+									<em>${clip.virality.total}</em>
+								</div>
+								<div class="tab-outputs__virality">
+									<span>Hook ${clip.virality.hook}</span>
+									<span>Eng ${clip.virality.engagement}</span>
+									<span>Value ${clip.virality.value}</span>
+									<span>Share ${clip.virality.shareability}</span>
+								</div>
+								<p>${escapeHtml(clip.virality.reason)}</p>
+								<div class="tab-outputs__short-meta">
+									<span>${escapeHtml(clip.preset)}</span>
+									<span>${escapeHtml(clip.captionStyle)}</span>
+									<span>${escapeHtml(clip.brollPrompts.slice(0, 2).join(" / "))}</span>
+								</div>
+							</article>
+						`).join("")}
+					</div>`}
+				<ul class="tab-outputs__recommendations">
+					${this.state.shortForm.productionNotes.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}
+				</ul>
+			</section>
+		`;
+	}
+
 	private renderNewsletter(): string {
 		return `
 			<section class="tab-outputs__section">
@@ -213,7 +254,7 @@ export class OutputsTab extends Component<State> {
 
 	private async copyReport(): Promise<void> {
 		try {
-			await navigator.clipboard.writeText(reportText(this.state.output, this.state.analytics));
+			await navigator.clipboard.writeText(reportText(this.state.output, this.state.analytics, this.state.shortForm));
 			toast("Report copied", "success");
 		} catch {
 			toast("Couldn't copy report", "error");
@@ -239,10 +280,11 @@ function generateState(): State {
 		agentActions: agentActionQueue.all(),
 		now: Date.now(),
 	});
-	return { output, analytics };
+	const shortForm = generateShortFormPackage(output, analytics);
+	return { output, analytics, shortForm };
 }
 
-function reportText(output: PostStreamOutput, analytics: StreamAnalytics): string {
+function reportText(output: PostStreamOutput, analytics: StreamAnalytics, shortForm: ShortFormPackage): string {
 	return [
 		`# ${output.title}`,
 		"",
@@ -269,6 +311,10 @@ function reportText(output: PostStreamOutput, analytics: StreamAnalytics): strin
 		"",
 		"## Clip Candidates",
 		...output.clipCandidates.map((clip) => `- ${clip.title} [${clip.source}, ${clip.score}] - ${clip.reason}`),
+		"",
+		"## Short-form Package",
+		...shortForm.clips.map((clip) => `- ${clip.title}: ${clip.virality.total}/100, ${clip.preset}, ${clip.captionStyle}, B-roll: ${clip.brollPrompts.join(" / ")}`),
+		...shortForm.productionNotes.map((line) => `- ${line}`),
 		"",
 		"## Unanswered Questions",
 		...(output.unansweredQuestions.length ? output.unansweredQuestions.map((question) => `- ${question}`) : ["- None captured"]),

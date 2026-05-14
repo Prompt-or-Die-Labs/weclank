@@ -28,6 +28,7 @@ import {
 } from "./egress";
 import { augmentedProcessEnv } from "./ffmpeg-env";
 import { transcodeWebmFileToMp4, trimMp4Segment } from "./recording-transcode";
+import { exportShortMp4Segment, getShortExportPreset, type ShortExportPresetId } from "./short-export";
 import {
 	registerRecordingPreviewPath,
 	registerImagePreviewPath,
@@ -415,6 +416,10 @@ export type PhotoBoothRPC = {
 			/** Export `[startSec, endSec)` to a new file via save dialog + ffmpeg. */
 			saveRecordingTrimmed: {
 				params: { sourcePath: string; startSec: number; endSec: number };
+				response: { ok: boolean; path?: string; reason?: string; error?: string };
+			};
+			saveRecordingShortExport: {
+				params: { sourcePath: string; startSec: number; endSec: number; preset: ShortExportPresetId };
 				response: { ok: boolean; path?: string; reason?: string; error?: string };
 			};
 			pickModelFile: {
@@ -866,6 +871,42 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 					const savePath = `${chosenPaths[0]}/${base}`;
 					const resolvedSource = resolve(sourcePath.trim());
 					await trimMp4Segment(resolvedSource, savePath, start, end - start);
+					return { ok: true, path: savePath };
+				} catch (e) {
+					return { ok: false, error: (e as Error).message };
+				}
+			},
+
+			saveRecordingShortExport: async ({ sourcePath, startSec, endSec, preset }) => {
+				if (!sourcePath?.trim()) return { ok: false, error: "sourcePath required" };
+				const presetMeta = getShortExportPreset(preset);
+				if (!presetMeta) return { ok: false, error: "Unknown short export preset" };
+				const start = Number(startSec);
+				const end = Number(endSec);
+				if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start + 0.05) {
+					return { ok: false, error: "end must be at least 0.05s after start" };
+				}
+				try {
+					const chosenPaths = await Utils.openFileDialog({
+						startingFolder: Bun.env["HOME"] || "/",
+						allowedFileTypes: "mp4",
+						canChooseFiles: false,
+						canChooseDirectory: true,
+						allowsMultipleSelection: false,
+					});
+					if (!chosenPaths[0] || chosenPaths[0] === "") {
+						return { ok: false, reason: "canceled" };
+					}
+					const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+					const savePath = `${chosenPaths[0]}/weclank-short-${presetMeta.id}-${stamp}.mp4`;
+					const resolvedSource = resolve(sourcePath.trim());
+					await exportShortMp4Segment({
+						inputPath: resolvedSource,
+						outputPath: savePath,
+						presetId: presetMeta.id,
+						startSec: start,
+						durationSec: end - start,
+					});
 					return { ok: true, path: savePath };
 				} catch (e) {
 					return { ok: false, error: (e as Error).message };

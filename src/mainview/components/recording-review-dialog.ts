@@ -40,9 +40,18 @@ export function openRecordingReviewDialog(filePath: string): void {
 				<button type="button" class="secondary" id="${uid}-mark1">Set end at playhead</button>
 			</div>
 		</div>
+		<div class="recording-review__short">
+			<label class="recording-review__label" for="${uid}-preset">Vertical export</label>
+			<select id="${uid}-preset">
+				<option value="tiktok">TikTok 1080x1920</option>
+				<option value="reels">Reels 1080x1920</option>
+				<option value="shorts">Shorts 1080x1920</option>
+			</select>
+		</div>
 		<p class="recording-review__hint">Keeps <strong id="${uid}-lab0">0:00</strong> → <strong id="${uid}-lab1">0:00</strong> (<span id="${uid}-dlen">0:00</span>). <strong>Save trimmed copy</strong> writes a new MP4; the file above stays until you delete it.</p>
 		<div class="recording-review__actions">
 			<button type="button" class="primary" id="${uid}-save">Save trimmed copy…</button>
+			<button type="button" class="primary" id="${uid}-short">Export vertical short…</button>
 			<button type="button" class="secondary" id="${uid}-share">Share</button>
 			<button type="button" class="danger" id="${uid}-del">Delete file</button>
 			<button type="button" class="secondary" id="${uid}-done">Done</button>
@@ -53,6 +62,7 @@ export function openRecordingReviewDialog(filePath: string): void {
 	const seek = body.querySelector<HTMLInputElement>(`#${uid}-seek`)!;
 	const t0 = body.querySelector<HTMLInputElement>(`#${uid}-t0`)!;
 	const t1 = body.querySelector<HTMLInputElement>(`#${uid}-t1`)!;
+	const preset = body.querySelector<HTMLSelectElement>(`#${uid}-preset`)!;
 	const lab0 = body.querySelector<HTMLElement>(`#${uid}-lab0`)!;
 	const lab1 = body.querySelector<HTMLElement>(`#${uid}-lab1`)!;
 	const dlen = body.querySelector<HTMLElement>(`#${uid}-dlen`)!;
@@ -128,6 +138,26 @@ export function openRecordingReviewDialog(filePath: string): void {
 			if (r.reason === "canceled") return;
 			if (!r.ok || !r.path) throw new Error(r.error ?? "Trim failed");
 			toast(`Saved trimmed copy to ${r.path}`, "success");
+		} catch (e) {
+			toast(userMessageFor(e), "error");
+		}
+	});
+
+	body.querySelector(`#${uid}-short`)?.addEventListener("click", async () => {
+		const start = Number(t0.value);
+		const end = Number(t1.value);
+		if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start + 0.05) {
+			toast("Set end after start by at least a split second.", "error");
+			return;
+		}
+		const chosen = preset.value === "tiktok" || preset.value === "reels" || preset.value === "shorts"
+			? preset.value
+			: "tiktok";
+		try {
+			const r = await bunRpc.saveRecordingShortExport({ sourcePath: filePath, startSec: start, endSec: end, preset: chosen });
+			if (r.reason === "canceled") return;
+			if (!r.ok || !r.path) throw new Error(r.error ?? "Short export failed");
+			toast(`Saved vertical short to ${r.path}`, "success");
 		} catch (e) {
 			toast(userMessageFor(e), "error");
 		}
