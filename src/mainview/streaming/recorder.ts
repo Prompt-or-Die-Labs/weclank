@@ -17,13 +17,16 @@ import { toast } from "../components/overlays";
 import { arrayBufferToBase64 } from "./base64";
 import { startBroadcastCapture, type BroadcastCaptureSession } from "./capture";
 
+const RECORDER_CHUNK_INTERVAL_MS = 1_000;
 const RECORDER_STOP_TIMEOUT_MS = 45_000;
+const RECORDER_FINAL_CHUNK_GRACE_MS = 750;
 
 interface RecorderSession {
 	capture: BroadcastCaptureSession;
 	writeChain: Promise<void>;
 	chunkError: Error | null;
 	acceptingChunks: boolean;
+	bytesWritten: number;
 }
 
 function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -89,12 +92,15 @@ class LocalRecorder {
 			const capture = startBroadcastCapture({
 				source: streamEngine,
 				quality: studio.state.stream.quality,
-				chunkIntervalMs: 5_000,
+				chunkIntervalMs: RECORDER_CHUNK_INTERVAL_MS,
 				onChunk: (blob) => {
 					if (!session?.acceptingChunks) return;
 					const activeSession = session;
 					activeSession.writeChain = activeSession.writeChain
 						.then(() => this.shipChunk(blob))
+						.then((bytes) => {
+							activeSession.bytesWritten += bytes;
+						})
 						.catch((err) => {
 							activeSession.chunkError = err instanceof Error ? err : new Error(String(err));
 						});
@@ -104,7 +110,7 @@ class LocalRecorder {
 					toast("Recording error — see console", "error");
 				},
 			});
-			session = { capture, writeChain: Promise.resolve(), chunkError: null, acceptingChunks: true };
+			session = { capture, writeChain: Promise.resolve(), chunkError: null, acceptingChunks: true, bytesWritten: 0 };
 			this.session = session;
 			studio.setStream({ recording: true });
 			return true;
@@ -144,9 +150,17 @@ class LocalRecorder {
 		let savedPath: string | null = null;
 		try {
 			await promiseWithTimeout(session.capture.stop(), RECORDER_STOP_TIMEOUT_MS, "MediaRecorder stop");
+			await this.drainChunkWrites(session);
+			await new Promise((resolve) => setTimeout(resolve, RECORDER_FINAL_CHUNK_GRACE_MS));
+			await this.drainChunkWrites(session);
 			session.acceptingChunks = false;
-			await session.writeChain;
 			if (session.chunkError) throw session.chunkError;
+			if (session.bytesWritten === 0) {
+				throw new AudioError(
+					"Recording produced no video data",
+					"The recorder stopped before the webview delivered any encoded video. Try recording for another second.",
+				);
+			}
 			const result = await bunRpc.finishRecordingFile({});
 			if (result.success && result.path) {
 				savedPath = result.path;
@@ -171,13 +185,26 @@ class LocalRecorder {
 		}
 	}
 
-	private async shipChunk(blob: Blob): Promise<void> {
+	private async drainChunkWrites(session: RecorderSession): Promise<void> {
+		for (let i = 0; i < 3; i++) {
+			const pending = session.writeChain;
+			await pending;
+			if (session.chunkError) throw session.chunkError;
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			if (session.writeChain === pending) return;
+		}
+		await session.writeChain;
+		if (session.chunkError) throw session.chunkError;
+	}
+
+	private async shipChunk(blob: Blob): Promise<number> {
 		const buffer = await blob.arrayBuffer();
 		const base64 = arrayBufferToBase64(buffer);
 		const result = await bunRpc.writeRecordingChunk({ base64 });
 		if (!result.ok) {
 			throw new IpcError(result.error ?? "unknown", `Couldn't write recording chunk: ${result.error ?? "no detail"}`);
 		}
+		return buffer.byteLength;
 	}
 }
 

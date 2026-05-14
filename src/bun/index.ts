@@ -790,6 +790,10 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 				try {
 					await writer.close();
 					await transcodeWebmFileToMp4(staging, output);
+					const outputStat = await stat(output);
+					if (outputStat.size <= 0) {
+						throw new Error("Recording output is empty");
+					}
 					await unlink(staging).catch(() => {});
 					return { success: true, path: output };
 				} catch (error) {
