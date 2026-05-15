@@ -58,9 +58,28 @@ jobs:
         run: echo "BUMP=${{ github.event.inputs.bump }}" >> "$GITHUB_ENV"
 
       - name: Create and push release tag
+        id: tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bun scripts/auto-release-tag.ts
+        run: |
+          before=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          bun scripts/auto-release-tag.ts
+          after=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$after" ] && [ "$after" != "$before" ]; then
+            echo "new_tag=$after" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_tag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # GITHUB_TOKEN-pushed tags don't trigger workflows by default, so
+      # we explicitly dispatch release.yml on the new tag ref. release.yml
+      # also has a `push: tags: v*` trigger for hand-pushed tags.
+      - name: Dispatch release workflow
+        if: steps.tag.outputs.new_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run release.yml --ref "${{ steps.tag.outputs.new_tag }}"
 
       - name: Release summary
         if: always()
