@@ -142,18 +142,35 @@ describe("multi-destination egress pipeline (Twitch + X simultaneously)", () => 
 
 		// What AppHeader.startEgress sends to Bun:
 		const destinations = targets.map((c) => `${c.rtmpUrl}/${c.streamKey}`);
-		const args = buildFfmpegArgs({ name: "libx264", extraArgs: [], label: "x264" }, destinations);
+		const args = buildFfmpegArgs({
+			encoder: { name: "libx264", extraArgs: [], label: "x264" },
+			targets: destinations,
+			fps: 30,
+			videoBitsPerSecond: 2_500_000,
+		});
 
 		expect(args).toContain("tee");
-		expect(args.at(-1)).toBe(
-			"[f=flv]rtmp://live.twitch.tv/app/twkey|[f=flv]rtmp://global-live.twitter.com:443/app/xkey",
-		);
+		// Each slave gets its own FLV muxer with onfail=ignore so one
+		// platform's 403 doesn't kill the entire stream, plus the
+		// non-seekable flag so RTMP sinks don't get a bogus final
+		// duration/filesize write.
+		const teeArg = args.at(-1)!;
+		expect(teeArg).toContain("rtmp://live.twitch.tv/app/twkey");
+		expect(teeArg).toContain("rtmp://global-live.twitter.com:443/app/xkey");
+		expect(teeArg).toContain("onfail=ignore");
+		expect(teeArg).toContain("flvflags=+no_duration_filesize");
+		expect(teeArg.split("|")).toHaveLength(2);
 	});
 
 	test("single-channel selection skips the tee muxer", () => {
 		const targets = filterActiveChannels(channels, ["twitch-1"]);
 		const destinations = targets.map((c) => `${c.rtmpUrl}/${c.streamKey}`);
-		const args = buildFfmpegArgs({ name: "libx264", extraArgs: [], label: "x264" }, destinations);
+		const args = buildFfmpegArgs({
+			encoder: { name: "libx264", extraArgs: [], label: "x264" },
+			targets: destinations,
+			fps: 30,
+			videoBitsPerSecond: 2_500_000,
+		});
 
 		expect(args).not.toContain("tee");
 		expect(args.at(-1)).toBe("rtmp://live.twitch.tv/app/twkey");
@@ -162,7 +179,12 @@ describe("multi-destination egress pipeline (Twitch + X simultaneously)", () => 
 	test("three-channel selection fans out to all three", () => {
 		const targets = filterActiveChannels(channels, ["twitch-1", "youtube-1", "x-1"]);
 		const destinations = targets.map((c) => `${c.rtmpUrl}/${c.streamKey}`);
-		const args = buildFfmpegArgs({ name: "libx264", extraArgs: [], label: "x264" }, destinations);
+		const args = buildFfmpegArgs({
+			encoder: { name: "libx264", extraArgs: [], label: "x264" },
+			targets: destinations,
+			fps: 30,
+			videoBitsPerSecond: 2_500_000,
+		});
 
 		expect(args).toContain("tee");
 		const teeArg = args.at(-1)!;

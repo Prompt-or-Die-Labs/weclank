@@ -59,14 +59,103 @@ class StubAudioContext extends StubAudioNode {
 	createBufferSource(): StubAudioNode & { buffer: unknown; start(): void; stop(): void; onended: null } {
 		return Object.assign(new StubAudioNode(), { buffer: null, start(): void {}, stop(): void {}, onended: null });
 	}
+	createDynamicsCompressor(): StubAudioNode & {
+		threshold: { value: number };
+		knee: { value: number };
+		ratio: { value: number };
+		attack: { value: number };
+		release: { value: number };
+	} {
+		return Object.assign(new StubAudioNode(), {
+			threshold: { value: 0 },
+			knee: { value: 0 },
+			ratio: { value: 0 },
+			attack: { value: 0 },
+			release: { value: 0 },
+		});
+	}
+	createDelay(_maxDelayTime?: number): StubAudioNode & { delayTime: { value: number } } {
+		return Object.assign(new StubAudioNode(), { delayTime: { value: 0 } });
+	}
 	resume(): Promise<void> { return Promise.resolve(); }
 	close(): Promise<void> { return Promise.resolve(); }
 	get audioWorklet(): { addModule(): Promise<void> } {
 		return { addModule: () => Promise.resolve() };
 	}
 }
-if (typeof globalThis.AudioContext === "undefined") {
-	(globalThis as unknown as { AudioContext: typeof StubAudioContext }).AudioContext = StubAudioContext;
+// Always override AudioContext, even when happy-dom provides one.
+// happy-dom's AudioContext returns nodes that are missing `connect` /
+// `disconnect` in some versions, which makes audio-mixer.addInput()
+// silently corrupt the graph in CI. Our StubAudioContext implements
+// every node-method we touch with no-op behavior so the wiring graph
+// completes deterministically. Tests that need a real WebAudio
+// runtime were never going to work in happy-dom anyway.
+(globalThis as unknown as { AudioContext: typeof StubAudioContext }).AudioContext = StubAudioContext;
+
+// AudioWorkletNode stub — modules that try to construct worklets at
+// load time (e.g. audio-filters with noise gate) need this so they
+// don't blow up before the bypass-fallback kicks in. In real tests
+// of the worklet itself, mock at the test site.
+class StubAudioWorkletNode extends StubAudioNode {
+	parameters = new Map<string, { value: number }>();
+	port = { postMessage(): void {}, close(): void {}, onmessage: null as unknown };
+}
+if (typeof globalThis.AudioWorkletNode === "undefined") {
+	(globalThis as unknown as { AudioWorkletNode: typeof StubAudioWorkletNode }).AudioWorkletNode = StubAudioWorkletNode;
+	void 0;
+}
+
+// HTMLCanvasElement.getContext — happy-dom returns null for "2d" in
+// some versions, which trips stream-engine.ts:42 at module load any
+// time something imports streamEngine. Stub a zero-effort 2D context
+// so the import chain doesn't blow up. Tests that actually render
+// pixels can mock at the test site.
+if (typeof HTMLCanvasElement !== "undefined") {
+	const original = HTMLCanvasElement.prototype.getContext;
+	const noopCtx2d = (): unknown => ({
+		canvas: null as unknown,
+		fillStyle: "",
+		strokeStyle: "",
+		globalAlpha: 1,
+		font: "",
+		textAlign: "start",
+		textBaseline: "alphabetic",
+		clearRect(): void {},
+		fillRect(): void {},
+		strokeRect(): void {},
+		drawImage(): void {},
+		fillText(): void {},
+		strokeText(): void {},
+		measureText(): { width: number } { return { width: 0 }; },
+		beginPath(): void {},
+		closePath(): void {},
+		moveTo(): void {},
+		lineTo(): void {},
+		arc(): void {},
+		rect(): void {},
+		fill(): void {},
+		stroke(): void {},
+		save(): void {},
+		restore(): void {},
+		translate(): void {},
+		scale(): void {},
+		rotate(): void {},
+		setTransform(): void {},
+		resetTransform(): void {},
+		getImageData(): { data: Uint8ClampedArray; width: number; height: number } {
+			return { data: new Uint8ClampedArray(0), width: 0, height: 0 };
+		},
+		putImageData(): void {},
+		createImageData(): { data: Uint8ClampedArray; width: number; height: number } {
+			return { data: new Uint8ClampedArray(0), width: 0, height: 0 };
+		},
+	});
+	HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string): unknown {
+		const real = original?.call(this, type as "2d");
+		if (real) return real;
+		if (type === "2d") return noopCtx2d();
+		return null;
+	} as typeof HTMLCanvasElement.prototype.getContext;
 }
 
 // Electrobun preload — the real one runs before the renderer JS loads

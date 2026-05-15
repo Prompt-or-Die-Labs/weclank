@@ -11,6 +11,7 @@ import { VoiceRenderer } from "./voice-renderer";
 import { ImageRenderer } from "./image-renderer";
 import { VRMRenderer } from "./vrm-renderer";
 import { GLBRenderer } from "./glb-renderer";
+import { BrowserRenderer } from "./browser-renderer";
 
 export function createRenderer(kind: SourceKind): AgentRenderer {
 	switch (kind) {
@@ -28,6 +29,8 @@ export function createRenderer(kind: SourceKind): AgentRenderer {
 			return new VRMRenderer();
 		case "voice-glb":
 			return new GLBRenderer();
+		case "browser":
+			return new BrowserRenderer();
 		case "text":
 			throw new Error("Text assistants have no canvas renderer");
 	}

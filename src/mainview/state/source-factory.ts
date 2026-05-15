@@ -13,6 +13,7 @@ import { initVoiceRoute } from "../tts/registry";
 import { participantRuntime } from "./participant-runtime";
 import { pickAssistantConfig } from "../banter/assistant-config-dialog";
 import { pickInputDevice } from "./device-picker";
+import { openUrlInputDialog } from "../components/input-dialog";
 import { banterEngine } from "../banter/banter-engine";
 import { mintId, participantId } from "../core/ids";
 import { userMessageFor } from "../core/errors";
@@ -147,6 +148,21 @@ export async function createParticipantFromKind(
 		}
 		case "voice":
 			break;
+		case "browser": {
+			const url = await openUrlInputDialog({
+				title: "Add browser source",
+				body: "Drop in an overlay / alert page URL. The iframe ships <code>window.obsstudio</code> so StreamElements, Streamlabs, Nightbot, etc. activate overlay mode automatically.",
+				label: "Page URL",
+				placeholder: "https://streamelements.com/overlay/...",
+				confirmLabel: "Add source",
+			});
+			if (!url) return null;
+			visual = {
+				browserUrl: url,
+				browserCss: "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }",
+			};
+			break;
+		}
 		case "voice-image": {
 			const r = await bunRpc.pickImageFileForVoiceParticipant({});
 			if (!r.canceled && r.path) {
@@ -342,6 +358,7 @@ function defaultName(kind: SourceKind): string {
 		case "voice-image": return "Image agent";
 		case "voice-vrm": return "VRM agent";
 		case "voice-glb": return "GLB agent";
+		case "browser": return "Browser source";
 		case "text": return "Assistant";
 	}
 }

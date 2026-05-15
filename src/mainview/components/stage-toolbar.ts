@@ -156,6 +156,7 @@ export class StageToolbar extends Component<State> {
 			<button class="menu__item" data-kind="camera"><span class="menu__icon" aria-hidden="true">${Icons.camera(14)}</span><span>Webcam</span></button>
 			<button class="menu__item" data-kind="screen"><span class="menu__icon" aria-hidden="true">${Icons.screen(14)}</span><span>Screen capture</span></button>
 			<button class="menu__item" data-kind="mic"><span class="menu__icon" aria-hidden="true">${Icons.mic(14)}</span><span>Microphone</span><small>external agent</small></button>
+			<button class="menu__item" data-kind="browser"><span class="menu__icon" aria-hidden="true">${Icons.notes(14)}</span><span>Browser source…</span><small>overlay / alert page</small></button>
 			<div class="menu__section">AI co-host</div>
 			<button class="menu__item" data-kind="voice"><span class="menu__icon" aria-hidden="true">${Icons.bot(14)}</span><span>Voice only</span></button>
 			<button class="menu__item" data-kind="voice-image"><span class="menu__icon" aria-hidden="true">${Icons.image(14)}</span><span>Voice + image</span></button>

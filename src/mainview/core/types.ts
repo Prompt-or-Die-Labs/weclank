@@ -12,6 +12,9 @@ export type SourceKind =
 	| "voice-image" // agent: TTS + static image
 	| "voice-vrm" // agent: TTS + VRM avatar (lip-sync from amplitude)
 	| "voice-glb" // agent: TTS + glTF/GLB model
+	| "browser" // iframe-rendered web page (overlay/alert/widget URL). Feature-detects
+	            // as OBS via window.obsstudio; works with StreamElements, Streamlabs,
+	            // Nightbot alert/chat pages.
 	| "text"; // text-only assistant — no audio/video, output shown in chat + producer tray
 
 /** Roles for text-only assistant participants. Each has a pre-canned system
@@ -32,6 +35,13 @@ export interface VisualConfig {
 	backgroundColor?: string;
 	// Animation triggers (idle, talking) — names match the model's clips.
 	animations?: { idle?: string; talking?: string };
+	/** Browser-source URL (kind: "browser"). The renderer mounts an
+	 *  iframe pointing at this URL. */
+	browserUrl?: string;
+	/** Extra CSS the renderer injects into the iframe at load time —
+	 *  same convention as OBS browser-source. Used to make overlay
+	 *  pages transparent: `body { background: rgba(0,0,0,0) }`. */
+	browserCss?: string;
 }
 
 export type TTSProviderId = "elevenlabs" | "openrouter" | "openai" | "elizacloud" | "omnivoice";

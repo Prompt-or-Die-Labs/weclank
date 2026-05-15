@@ -7,7 +7,7 @@
 import { getSecret } from "../auth/secrets-cache";
 import { ELIZACLOUD_API_KEY } from "../auth/elizacloud-api";
 import { ApiError, ConfigError } from "../core/errors";
-import { withBackoff, isRetryableStatus } from "../core/retry";
+import { withBackoff, isRetryableStatus } from "../../shared/retry";
 
 const ENDPOINT = "https://elizacloud.ai/api/v1/images/generations";
 

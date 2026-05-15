@@ -11,6 +11,57 @@ import { bunRpc } from "../rpc";
 import { streamEngine } from "../streaming/stream-engine";
 import { banterEngine } from "../banter/banter-engine";
 import { micTranscriber } from "../transcription/mic-transcriber";
+import { toast } from "./overlays";
+
+export type Lifecycle = "idle" | "live" | "reconnecting" | "failed";
+
+/** Pure helper — given the two RPC responses + the last-seen error
+ *  timestamp, return the state patch and an optional toast directive.
+ *  Extracted so it can be unit-tested without DOM mocking. */
+export function reduceStatsPoll(
+	stats: {
+		bitrateKbps?: number;
+		droppedFrames?: number;
+		timeSeconds?: number;
+		lifecycle?: Lifecycle;
+		reconnectAttempt?: number;
+	},
+	error: {
+		message?: string;
+		at?: number;
+		severity?: "fatal" | "transient" | "info";
+	},
+	prevLastErrorAt: number,
+): {
+	patch: {
+		bitrateKbps: number;
+		droppedFrames: number;
+		timeSeconds: number;
+		lifecycle: Lifecycle;
+		reconnectAttempt?: number;
+	};
+	toast?: { message: string; tone: "info" | "success" | "error" };
+	lastErrorAt: number;
+} {
+	const patch = {
+		bitrateKbps: stats.bitrateKbps ?? 0,
+		droppedFrames: stats.droppedFrames ?? 0,
+		timeSeconds: stats.timeSeconds ?? 0,
+		lifecycle: (stats.lifecycle ?? "live") as Lifecycle,
+		reconnectAttempt: stats.reconnectAttempt,
+	};
+	if (error.message && error.at && error.at > prevLastErrorAt) {
+		return {
+			patch,
+			toast: {
+				message: error.message,
+				tone: error.severity === "transient" ? "info" : "error",
+			},
+			lastErrorAt: error.at,
+		};
+	}
+	return { patch, lastErrorAt: prevLastErrorAt };
+}
 
 interface State {
 	live: boolean;
@@ -22,6 +73,10 @@ interface State {
 	bantering: number;
 	transcriptOn: boolean;
 	sttCostUsd: number;
+	/** Supervisor lifecycle from the Bun side. Drives the LIVE pill color:
+	 *  green=live, amber=reconnecting, red=failed. */
+	lifecycle: Lifecycle;
+	reconnectAttempt?: number;
 }
 
 export class StatsStrip extends Component<State> {
@@ -39,6 +94,7 @@ export class StatsStrip extends Component<State> {
 			bantering: banterEngine.sessionCount(),
 			transcriptOn: !!studio.state.transcript?.enabled,
 			sttCostUsd: micTranscriber.getStats().cumulativeCostUsd,
+			lifecycle: "idle",
 		});
 		studio.select(
 			(s) => ({ live: s.stream.live, quality: s.stream.quality }),
@@ -60,12 +116,14 @@ export class StatsStrip extends Component<State> {
 			this.state.sttCostUsd > 0.0005
 				? `<span class="stats-cell stats-cell--subtle">STT ≈ $${this.state.sttCostUsd.toFixed(3)}</span>`
 				: "";
+		const pillLabel = pillLabelFor(this.state.lifecycle, live, this.state.reconnectAttempt);
+		const pillClass = pillClassFor(this.state.lifecycle, live);
 		return `
 			<span class="stats-cell stats-cell--group">
 				<span class="stats-cell__label">Broadcast</span>
-				<span class="stats-cell ${live ? "stats-cell--live" : ""}">
+				<span class="stats-cell ${pillClass}">
 					<span class="stats-dot ${live ? "stats-dot--live" : ""}"></span>
-					${live ? "LIVE" : "IDLE"} · ${this.state.quality}
+					${pillLabel} · ${this.state.quality}
 				</span>
 				${live ? `<span class="stats-cell">${formatDuration(this.state.timeSeconds)}</span>` : ""}
 				${live ? `<span class="stats-cell">${this.state.bitrateKbps.toFixed(0)} kbps</span>` : ""}
@@ -104,19 +162,35 @@ export class StatsStrip extends Component<State> {
 		cancelAnimationFrame(this.rafTick);
 	}
 
+	private lastErrorAt = 0;
+
 	private async tickPoll(): Promise<void> {
 		if (!this.state.live) return;
 		try {
-			const s = await bunRpc.getStreamStats({});
-			this.setState({
-				bitrateKbps: s.bitrateKbps ?? 0,
-				droppedFrames: s.droppedFrames ?? 0,
-				timeSeconds: s.timeSeconds ?? 0,
-			});
+			const [stats, err] = await Promise.all([
+				bunRpc.getStreamStats({}),
+				bunRpc.getStreamError({}),
+			]);
+			const result = reduceStatsPoll(stats, err, this.lastErrorAt);
+			this.setState(result.patch);
+			this.lastErrorAt = result.lastErrorAt;
+			if (result.toast) toast(result.toast.message, result.toast.tone);
 		} catch {
 			/* swallow — egress process might be mid-stop */
 		}
 	}
+}
+
+function pillLabelFor(lifecycle: Lifecycle, live: boolean, attempt?: number): string {
+	if (lifecycle === "reconnecting") return `RECONNECTING${attempt ? ` (${attempt})` : ""}`;
+	if (lifecycle === "failed") return "FAILED";
+	return live ? "LIVE" : "IDLE";
+}
+
+function pillClassFor(lifecycle: Lifecycle, live: boolean): string {
+	if (lifecycle === "reconnecting") return "stats-cell--reconnecting";
+	if (lifecycle === "failed") return "stats-cell--failed";
+	return live ? "stats-cell--live" : "";
 }
 
 function formatDuration(seconds: number): string {

@@ -4,7 +4,7 @@
 import { getSecret } from "../auth/secrets-cache";
 import { OPENAI_API_KEY } from "../auth/openai-api";
 import { ApiError, ConfigError } from "../core/errors";
-import { withBackoff, isRetryableStatus } from "../core/retry";
+import { withBackoff, isRetryableStatus } from "../../shared/retry";
 import type { TranscribeResult } from "./openrouter-stt";
 
 export const DEFAULT_OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";

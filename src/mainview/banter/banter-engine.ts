@@ -30,6 +30,7 @@ import { runtimeAutonomy, runtimeToolPermissions } from "./tool-policy";
 import { studio } from "../state/studio-store";
 import { transcriptFeed } from "../transcript/feed";
 import { micTranscriber } from "../transcription/mic-transcriber";
+import { logger, metrics } from "../observability";
 import { ensureVoiceRoute } from "../tts/registry";
 import { userMessageFor } from "../core/errors";
 import { setAiDegradedMessage } from "../studio-health";
@@ -282,14 +283,17 @@ class BanterSession {
 			}
 			const provider = this.ensureProvider();
 			if (!provider) {
-				console.warn("[banter] no TTS provider — set voice settings on", this.participantId);
+				metrics().incrementCounter("banter_no_provider_total", { participant: this.participantId });
+				logger().withFields({ component: "banter", participant: this.participantId }).warn("no TTS provider — set voice settings");
 				this.phase = "idle";
 				return;
 			}
 			this.phase = "speaking";
+			metrics().incrementCounter("banter_speak_total", { participant: this.participantId });
 			await provider.speak(reply);
 		} catch (err) {
-			console.warn("[banter] respond failed", err);
+			metrics().incrementCounter("banter_respond_failures_total", { participant: this.participantId });
+			logger().withFields({ component: "banter", participant: this.participantId }).withError(err).warn("respond failed");
 			setAiDegradedMessage(userMessageFor(err));
 		} finally {
 			this.phase = "idle";
@@ -381,7 +385,8 @@ class BanterSession {
 			this.phase = "speaking";
 			await provider.speak(reply);
 		} catch (err) {
-			console.warn("[banter] proactive comment failed", err);
+			metrics().incrementCounter("banter_proactive_failures_total", { participant: this.participantId });
+			logger().withFields({ component: "banter", participant: this.participantId }).withError(err).warn("proactive comment failed");
 			setAiDegradedMessage(userMessageFor(err));
 		} finally {
 			this.phase = "idle";
@@ -402,7 +407,8 @@ class BanterSession {
 		try {
 			return ensureVoiceRoute(this.participantId);
 		} catch (err) {
-			console.warn("[banter] lazy TTS init failed", err);
+			metrics().incrementCounter("banter_tts_init_failures_total", { participant: this.participantId });
+			logger().withFields({ component: "banter", participant: this.participantId }).withError(err).warn("lazy TTS init failed");
 			return null;
 		}
 	}
@@ -426,7 +432,7 @@ class BanterEngine {
 			try {
 				fn();
 			} catch (err) {
-				console.warn("[banter] session lifecycle listener failed", err);
+				logger().withField("component", "banter").withError(err).warn("session lifecycle listener failed");
 			}
 		}
 	}

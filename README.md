@@ -1,6 +1,12 @@
 # Weclank
 
+[![CI](https://github.com/Prompt-or-Die-Labs/weclank/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Prompt-or-Die-Labs/weclank/actions/workflows/ci.yml)
+[![Release](https://github.com/Prompt-or-Die-Labs/weclank/actions/workflows/release.yml/badge.svg)](https://github.com/Prompt-or-Die-Labs/weclank/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/Prompt-or-Die-Labs/weclank?include_prereleases&sort=semver)](https://github.com/Prompt-or-Die-Labs/weclank/releases/latest)
+
 AI co-host for coding livestreams.
+
+**Latest build** → <https://github.com/Prompt-or-Die-Labs/weclank/releases/latest> (macOS arm64, Linux x64, Windows x64 — auto-built on every merge to `main`).
 
 One binary. No cloud project. Your machine, your data — accounts, scenes, agents, transcripts, and stream state stay local. Secrets use macOS Keychain when available and local SQLite elsewhere.
 

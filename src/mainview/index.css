@@ -555,12 +555,16 @@ input, textarea, select { font: inherit; }
 }
 .stats-cell--right { margin-left: auto; }
 .stats-cell--live { color: var(--text-0); }
+.stats-cell--reconnecting { color: var(--warning); }
+.stats-cell--failed { color: var(--danger); }
 .stats-dot {
 	width: 6px; height: 6px;
 	border-radius: 999px;
 	background: var(--text-3);
 }
 .stats-dot--live { background: var(--danger); animation: stats-pulse 1.4s ease-in-out infinite; }
+.stats-cell--reconnecting .stats-dot { background: var(--warning); animation: stats-pulse 0.7s ease-in-out infinite; }
+.stats-cell--failed .stats-dot { background: var(--danger); }
 @keyframes stats-pulse {
 	0%, 100% { opacity: 1; }
 	50% { opacity: 0.4; }
@@ -4645,6 +4649,157 @@ input, textarea, select { font: inherit; }
 	letter-spacing: 0.06em;
 }
 .settings-action:hover { background: var(--bg-2); color: var(--text-0); }
+
+/* --- generic input dialog (replaces window.prompt) ---------------- */
+.input-dialog { display: flex; flex-direction: column; gap: var(--space-3); font-size: 13px; min-width: 360px; }
+.input-dialog__body { margin: 0; color: var(--text-1); font-size: 12px; }
+.input-dialog__body code {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	background: var(--bg-2);
+	padding: 1px 4px;
+	border-radius: 3px;
+}
+.input-dialog__field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.input-dialog__field span {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text-2);
+}
+.input-dialog__field input {
+	padding: 8px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-0);
+	color: var(--text-0);
+	font-family: var(--font-mono);
+	font-size: 12px;
+}
+.input-dialog__field input:focus-visible {
+	outline: none;
+	border-color: var(--accent);
+}
+.input-dialog__error {
+	font-size: 12px;
+	color: var(--danger);
+	font-family: var(--font-mono);
+}
+.input-dialog__buttons {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--space-2);
+}
+.input-dialog__confirm {
+	background: var(--accent);
+	color: var(--bg-0);
+	border-color: var(--accent);
+}
+.input-dialog__confirm:hover { filter: brightness(1.1); }
+
+/* --- obs-websocket settings dialog ------------------------------- */
+.obs-ws-settings { display: flex; flex-direction: column; gap: var(--space-3); font-size: 13px; }
+.obs-ws-settings__intro { margin: 0; color: var(--text-1); }
+.obs-ws-settings__row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3);
+}
+.obs-ws-settings__toggle {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 600;
+	cursor: pointer;
+}
+.obs-ws-settings__badge {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	padding: 4px 10px;
+	border-radius: var(--radius-sm);
+	border: 1px solid var(--border);
+}
+.obs-ws-settings__badge--ok { color: var(--ok); border-color: currentColor; }
+.obs-ws-settings__badge--err { color: var(--danger); border-color: currentColor; }
+.obs-ws-settings__badge--off { color: var(--text-3); }
+.obs-ws-settings__error {
+	border: 1px solid var(--danger);
+	background: color-mix(in srgb, var(--danger) 8%, transparent);
+	border-radius: var(--radius-sm);
+	padding: var(--space-2) var(--space-3);
+}
+.obs-ws-settings__error code {
+	display: block;
+	margin: 4px 0;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	word-break: break-word;
+}
+.obs-ws-settings__error p { margin: 4px 0 0; font-size: 12px; color: var(--text-1); }
+.obs-ws-settings__fieldset {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: var(--space-3);
+	margin: 0;
+}
+.obs-ws-settings__fieldset[disabled] { opacity: 0.5; pointer-events: none; }
+.obs-ws-settings__fieldset legend {
+	padding: 0 6px;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text-2);
+}
+.obs-ws-settings__fieldset label {
+	display: grid;
+	grid-template-columns: auto 1fr auto;
+	gap: 8px;
+	align-items: center;
+}
+.obs-ws-settings__fieldset label small { color: var(--text-3); font-size: 11px; }
+.obs-ws-settings__field input[type="number"],
+.obs-ws-settings__field input[type="password"] {
+	min-width: 0;
+	padding: 6px 10px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-0);
+	color: var(--text-0);
+	font-family: var(--font-mono);
+}
+.obs-ws-settings__clear {
+	font-size: 10px;
+	padding: 4px 8px;
+	background: transparent;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-2);
+	cursor: pointer;
+}
+.obs-ws-settings__how {
+	border-top: 1px solid var(--border);
+	padding-top: var(--space-3);
+	color: var(--text-1);
+}
+.obs-ws-settings__how h4 { margin: 0 0 6px; font-size: 13px; }
+.obs-ws-settings__how ol { margin: 0; padding-left: 22px; }
+.obs-ws-settings__how li { margin: 4px 0; }
+.obs-ws-settings__how code {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	background: var(--bg-2);
+	padding: 1px 4px;
+	border-radius: 3px;
+}
+.obs-ws-settings__footer { display: flex; justify-content: flex-end; }
 
 /* Channels list inside the settings dialog. */
 .channels-list { display: flex; flex-direction: column; gap: 4px; margin: var(--space-2) 0; }

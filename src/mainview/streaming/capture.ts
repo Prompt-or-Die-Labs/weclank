@@ -32,6 +32,11 @@ export interface CaptureSink {
 	 * capture loop catches and logs, but a thrown sink could block other
 	 * sinks behind it. */
 	onChunk(blob: Blob): void;
+	/** Optional: notified when MediaRecorder fires an `error` event.
+	 *  Sinks that care (egress, replay-buffer) can use this to surface a
+	 *  toast and/or tear down. The recorder's underlying state is broken
+	 *  by this point — chunks have stopped flowing. */
+	onError?(err: Error): void;
 	/** Called once when the sink is detached OR the session is shutting
 	 * down. The sink should flush any pending writes here. */
 	onStop(): void | Promise<void>;
@@ -176,7 +181,17 @@ class BroadcastCapture {
 		};
 		recorder.addEventListener("dataavailable", onDataAvailable as EventListener);
 		recorder.addEventListener("error", (event) => {
-			console.error("[capture] MediaRecorder error", event);
+			// MediaRecorder fires `error` and stops emitting chunks.
+			// Without onError propagation, every sink would sit attached
+			// to a recorder that's silently no longer producing data.
+			const detail = (event as Event & { error?: Error }).error;
+			const err = detail instanceof Error
+				? detail
+				: new Error("MediaRecorder error (no detail)");
+			console.error("[capture] MediaRecorder error", err);
+			for (const sink of session.sinks.values()) {
+				try { sink.onError?.(err); } catch (e) { console.warn(`[capture] sink "${sink.id}" onError threw`, e); }
+			}
 		});
 		recorder.start(opts.chunkIntervalMs);
 		session.flushTimer = setInterval(() => {

@@ -35,14 +35,24 @@ beforeAll(() => {
 	// by later tests (TTS providers via streaming-provider.ts) read
 	// `audioMixer.ctx`, so a minimal stub here would null-pointer them.
 	mock.module("../streaming/audio-mixer", () => {
+		// Bun's `mock.module` is process-wide — the stub leaks into other
+		// test files' `audioMixer` imports. Maintain a real channels map so
+		// downstream callers (vad.test.ts, etc.) get a working analyser
+		// back from `addInput` / `getAnalyser`, not undefined.
 		const ctx = new AudioContext();
+		const channels = new Map<string, AnalyserNode>();
 		return {
 			audioMixer: {
 				ctx,
-				removeInput: () => {},
-				addInput: () => null,
-				getAnalyser: () => undefined,
-				hasChannel: () => false,
+				removeInput: (id: string) => { channels.delete(id); },
+				addInput: (id: string) => {
+					const a = ctx.createAnalyser();
+					channels.set(id, a);
+					return a;
+				},
+				getAnalyser: (id: string) => channels.get(id),
+				hasChannel: (id: string) => channels.has(id),
+				channelIds: () => Array.from(channels.keys()),
 				resume: async () => {},
 			},
 		};

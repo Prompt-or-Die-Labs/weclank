@@ -14,7 +14,7 @@
 
 import { MessageQueue, type ChatMessage } from "../banter/chat-source";
 import { ApiError } from "../core/errors";
-import { reconnectLoop } from "../core/retry";
+import { reconnectLoop } from "../../shared/retry";
 import type { ChatConnector, ConnectorStatus } from "./chat-connector";
 
 const PUSHER_URL = "wss://ws-us2.pusher.com/app/eb1d5f283081a78b932c?protocol=7&client=js&version=7.6.0&flash=false";
