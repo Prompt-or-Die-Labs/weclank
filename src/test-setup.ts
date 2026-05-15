@@ -83,47 +83,14 @@ class StubAudioContext extends StubAudioNode {
 		return { addModule: () => Promise.resolve() };
 	}
 }
-if (typeof globalThis.AudioContext === "undefined") {
-	(globalThis as unknown as { AudioContext: typeof StubAudioContext }).AudioContext = StubAudioContext;
-} else {
-	// happy-dom provides an AudioContext stub of its own. It varies by
-	// version — Ubuntu CI runs a version missing createDelay /
-	// createDynamicsCompressor / audioWorklet. Patch the prototype with
-	// the same shape our code uses, falling through to the original if
-	// happy-dom does provide them.
-	const proto = (globalThis as { AudioContext: typeof AudioContext }).AudioContext.prototype as {
-		createDelay?: (max?: number) => unknown;
-		createDynamicsCompressor?: () => unknown;
-		createGain?: () => unknown;
-		createAnalyser?: () => unknown;
-		createMediaStreamSource?: (s: MediaStream) => unknown;
-		createMediaStreamDestination?: () => unknown;
-		createBuffer?: (channels: number, length: number, sampleRate: number) => unknown;
-		createBufferSource?: () => unknown;
-		audioWorklet?: { addModule(url: string): Promise<void> };
-	};
-	const stub = StubAudioContext.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
-	for (const name of [
-		"createDelay",
-		"createDynamicsCompressor",
-		"createGain",
-		"createAnalyser",
-		"createMediaStreamSource",
-		"createMediaStreamDestination",
-		"createBuffer",
-		"createBufferSource",
-	] as const) {
-		if (typeof (proto as Record<string, unknown>)[name] !== "function") {
-			(proto as Record<string, unknown>)[name] = stub[name];
-		}
-	}
-	// audioWorklet is a getter on the real spec — patch only if missing.
-	if (!proto.audioWorklet) {
-		Object.defineProperty(proto, "audioWorklet", {
-			get: () => ({ addModule: () => Promise.resolve() }),
-		});
-	}
-}
+// Always override AudioContext, even when happy-dom provides one.
+// happy-dom's AudioContext returns nodes that are missing `connect` /
+// `disconnect` in some versions, which makes audio-mixer.addInput()
+// silently corrupt the graph in CI. Our StubAudioContext implements
+// every node-method we touch with no-op behavior so the wiring graph
+// completes deterministically. Tests that need a real WebAudio
+// runtime were never going to work in happy-dom anyway.
+(globalThis as unknown as { AudioContext: typeof StubAudioContext }).AudioContext = StubAudioContext;
 
 // AudioWorkletNode stub — modules that try to construct worklets at
 // load time (e.g. audio-filters with noise gate) need this so they
