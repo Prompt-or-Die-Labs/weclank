@@ -31,6 +31,7 @@ jobs:
   tag:
     name: Compute version and push tag
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: >-
       (github.event_name == 'push' && github.event.head_commit != null &&
       !contains(github.event.head_commit.message, '[skip release]')) ||
@@ -60,3 +61,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun scripts/auto-release-tag.ts
+
+      - name: Release summary
+        if: always()
+        run: |
+          {
+            echo "### Auto-tag result"
+            echo "- HEAD: \`$(git rev-parse --short HEAD)\`"
+            echo "- Latest tag: \`$(git describe --tags --abbrev=0 2>/dev/null || echo 'none')\`"
+            echo ""
+            echo "If a new tag was pushed, release.yml will now build artifacts for macOS / Linux / Windows."
+          } >> "$GITHUB_STEP_SUMMARY"

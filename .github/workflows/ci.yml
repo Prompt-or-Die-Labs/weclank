@@ -14,16 +14,46 @@ jobs:
   check:
     name: Typecheck + lint + tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.3"
+
+      # Cache Bun's per-user install dir keyed on bun.lock. Saves
+      # ~25s vs a cold install on every PR push.
+      - name: Cache Bun deps
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # The egress smoke + RTMP-loopback + encoder-probe tests fire up
+      # real ffmpeg. Without this they skip silently — installing it
+      # turns the smoke tests into real verification.
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+
       - name: Check (typecheck + lint + tests)
         run: bun run check
+
+      - name: Environment summary
+        if: always()
+        run: |
+          {
+            echo "### Environment"
+            echo "- runner: \`$(uname -srm)\`"
+            echo "- bun: \`$(bun --version 2>/dev/null || echo missing)\`"
+            echo "- ffmpeg: \`$(ffmpeg -version 2>/dev/null | head -1 || echo missing)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
