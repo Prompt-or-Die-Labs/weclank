@@ -19,6 +19,7 @@ import { studio } from "../state/studio-store";
 import type { RtmpChannel } from "../core/types";
 import { loadChannels, subscribeChannels } from "../streaming/channels";
 import { openChannelLinkDialog } from "../streaming/channel-link-dialog";
+import { openConfirmDialog } from "./input-dialog";
 import { Popover, toast } from "./overlays";
 import { escapeHtml } from "./primitives";
 
@@ -116,7 +117,13 @@ export class ChannelStrip extends Component<State> {
 	private async removeChannelById(channelId: string): Promise<void> {
 		const channel = this.state.channels.find((c) => c.id === channelId);
 		if (!channel) return;
-		if (!window.confirm(`Remove ${channel.label || "this channel"}?`)) return;
+		const ok = await openConfirmDialog({
+			title: "Remove channel",
+			body: `Remove ${channel.label || "this channel"}?`,
+			confirmLabel: "Remove",
+			destructive: true,
+		});
+		if (!ok) return;
 		const { removeChannel } = await import("../streaming/channels");
 		await removeChannel(channelId);
 		const next = (this.state.activeIds ?? []).filter((id) => id !== channelId);
@@ -152,7 +159,13 @@ export class ChannelStrip extends Component<State> {
 				if (btn.dataset["act"] === "edit") {
 					await openChannelLinkDialog({ edit: channel });
 				} else {
-					if (!window.confirm(`Remove ${channel.label || "this channel"}?`)) return;
+					const ok = await openConfirmDialog({
+						title: "Remove channel",
+						body: `Remove ${channel.label || "this channel"}?`,
+						confirmLabel: "Remove",
+						destructive: true,
+					});
+					if (!ok) return;
 					const { removeChannel } = await import("../streaming/channels");
 					await removeChannel(channelId);
 					// Drop the id from active selection too.

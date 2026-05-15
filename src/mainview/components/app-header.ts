@@ -17,6 +17,7 @@ import { toggleBroadcast, toggleRecording as toggleRecordingAction, saveReplayBu
 import { userMessageFor } from "../core/errors";
 import { bunRpc } from "../rpc";
 import { openSettingsDialog } from "./settings-dialog";
+import { openConfirmDialog } from "./input-dialog";
 import { ChannelStrip } from "./channel-strip";
 
 interface State {
@@ -176,12 +177,19 @@ export class AppHeader extends Component<State> {
 						authStore.logout();
 						location.reload();
 						break;
-					case "delete":
-						if (window.confirm("Permanently delete this account and all its scenes / agents / keys?")) {
+					case "delete": {
+						const ok = await openConfirmDialog({
+							title: "Delete account",
+							body: "Permanently delete this account and all its scenes / agents / keys?",
+							confirmLabel: "Delete account",
+							destructive: true,
+						});
+						if (ok) {
 							await authStore.deleteAccount();
 							location.reload();
 						}
 						break;
+					}
 				}
 			});
 		});

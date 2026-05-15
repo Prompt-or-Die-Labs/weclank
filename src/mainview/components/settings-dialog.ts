@@ -17,6 +17,7 @@ import { bunRpc } from "../rpc";
 import { PRODUCT_PROMISE, PRODUCT_TAGLINE } from "../product";
 import { getTheme, setTheme, type ThemeMode } from "./theme";
 import { Modal, toast } from "./overlays";
+import { openConfirmDialog } from "./input-dialog";
 import { escapeAttr, escapeHtml } from "./primitives";
 import type { WorkspaceAppId } from "../../bun/workspace-apps";
 import { serializeState } from "../state/persistence";
@@ -399,7 +400,13 @@ function wireChannelsList(body: HTMLElement): void {
 			if (!id) return;
 			const channel = loadChannels().find((c) => c.id === id);
 			if (!channel) return;
-			if (!window.confirm(`Remove "${channel.label || channel.platform}"?`)) return;
+			const ok = await openConfirmDialog({
+				title: "Remove channel",
+				body: `Remove "${channel.label || channel.platform}"?`,
+				confirmLabel: "Remove",
+				destructive: true,
+			});
+			if (!ok) return;
 			await removeChannel(id);
 			// Drop the id from the active selection too.
 			const next = (studio.state.stream.activeChannelIds ?? []).filter((cid) => cid !== id);
@@ -457,7 +464,13 @@ async function connectCodex(): Promise<void> {
 }
 
 async function runDisconnectCodex(): Promise<void> {
-	if (!window.confirm("Sign out of ChatGPT (Codex)? Agents using Codex models will need another provider.")) return;
+	const ok = await openConfirmDialog({
+		title: "Sign out of ChatGPT (Codex)?",
+		body: "Agents using Codex models will need another provider.",
+		confirmLabel: "Sign out",
+		destructive: true,
+	});
+	if (!ok) return;
 	try {
 		await disconnectCodex();
 		toast("ChatGPT (Codex) disconnected", "success");
@@ -467,7 +480,13 @@ async function runDisconnectCodex(): Promise<void> {
 }
 
 async function runDisconnectElizaCloud(): Promise<void> {
-	if (!window.confirm("Remove the saved Eliza Cloud API key?")) return;
+	const ok = await openConfirmDialog({
+		title: "Disconnect Eliza Cloud?",
+		body: "Remove the saved Eliza Cloud API key?",
+		confirmLabel: "Disconnect",
+		destructive: true,
+	});
+	if (!ok) return;
 	try {
 		await disconnectElizaCloud();
 		toast("Eliza Cloud disconnected", "success");

@@ -99,6 +99,60 @@ export function openInputDialog(opts: InputDialogOptions): Promise<string | null
 	});
 }
 
+export interface ConfirmDialogOptions {
+	title: string;
+	/** Body copy. Plain text — escaped before rendering. */
+	body: string;
+	/** Defaults to "OK". */
+	confirmLabel?: string;
+	/** Defaults to "Cancel". */
+	cancelLabel?: string;
+	/** Renders the confirm button as destructive. Use for delete-like actions. */
+	destructive?: boolean;
+}
+
+/** Promise-returning confirm dialog. Replaces `window.confirm()` — Electrobun's
+ *  WKWebView doesn't implement the JS dialog UI delegate, so `window.confirm`
+ *  returns falsy without showing anything. Always returns a real boolean. */
+export function openConfirmDialog(opts: ConfirmDialogOptions): Promise<boolean> {
+	return new Promise((resolve) => {
+		const body = document.createElement("div");
+		body.className = "input-dialog";
+		const confirmClass = opts.destructive
+			? "settings-action settings-action--danger input-dialog__confirm"
+			: "settings-action input-dialog__confirm";
+		body.innerHTML = `
+			<p class="input-dialog__body">${escapeHtml(opts.body)}</p>
+			<div class="input-dialog__buttons">
+				<button type="button" class="settings-action" data-act="cancel">${escapeHtml(opts.cancelLabel ?? "Cancel")}</button>
+				<button type="button" class="${confirmClass}" data-act="confirm">${escapeHtml(opts.confirmLabel ?? "OK")}</button>
+			</div>
+		`;
+
+		let settled = false;
+		const settle = (value: boolean): void => {
+			if (settled) return;
+			settled = true;
+			modal.close();
+			resolve(value);
+		};
+
+		const modal = new Modal({
+			title: opts.title,
+			body,
+			initialFocusSelector: ".input-dialog__confirm",
+			onClose: () => settle(false),
+		});
+
+		body.querySelector<HTMLButtonElement>("[data-act=cancel]")?.addEventListener("click", () => settle(false));
+		body.querySelector<HTMLButtonElement>("[data-act=confirm]")?.addEventListener("click", () => settle(true));
+		body.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") { e.preventDefault(); settle(true); }
+			else if (e.key === "Escape") { e.preventDefault(); settle(false); }
+		});
+	});
+}
+
 /** Convenience: URL-validating input dialog. Accepts https/http and
  *  rejects clearly-bad inputs early. Empty input cancels (returns null). */
 export function openUrlInputDialog(opts: Omit<InputDialogOptions, "type" | "validate">): Promise<string | null> {

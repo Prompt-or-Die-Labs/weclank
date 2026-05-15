@@ -13,7 +13,7 @@ import { initVoiceRoute } from "../tts/registry";
 import { participantRuntime } from "./participant-runtime";
 import { pickAssistantConfig } from "../banter/assistant-config-dialog";
 import { pickInputDevice } from "./device-picker";
-import { openUrlInputDialog } from "../components/input-dialog";
+import { openConfirmDialog, openUrlInputDialog } from "../components/input-dialog";
 import { banterEngine } from "../banter/banter-engine";
 import { mintId, participantId } from "../core/ids";
 import { userMessageFor } from "../core/errors";
@@ -73,11 +73,17 @@ export async function createParticipantFromKind(
 
 			// Optional: pair a mic with the camera. Critical for VAD —
 			// the banter agent's "pause while I'm speaking" only works if
-			// the dev's voice is in the mixer. Asking with confirm() is
-			// crude but unambiguous; the user opts in once per source.
-			const includeMic = window.confirm(
-				"Include a microphone with this camera? Recommended — the banter agent uses it to know when you're speaking so it doesn't talk over you.",
-			);
+			// the dev's voice is in the mixer. Electrobun's WKWebView
+			// doesn't implement window.confirm(), so we go through the
+			// in-app dialog — without it the function silently fell
+			// through to "no mic" AND left the camera turned off, which
+			// looked exactly like "webcam doesn't connect to anything."
+			const includeMic = await openConfirmDialog({
+				title: "Include a microphone?",
+				body: "Pair a mic with this camera — recommended. The banter agent uses it to know when you're speaking so it doesn't talk over you.",
+				confirmLabel: "Yes, include mic",
+				cancelLabel: "Camera only",
+			});
 			if (includeMic) {
 				const mic = await pickInputDevice("audioinput");
 				if (mic) {
@@ -104,6 +110,23 @@ export async function createParticipantFromKind(
 					} catch (err) {
 						toast(`Mic capture failed: ${userMessageFor(err)}`, "error");
 					}
+				}
+			}
+			// Whether or not the user opted into a mic, pre-acquire the
+			// camera so it actually shows up in the tile. The old code
+			// left `cameraOff = true` on the "camera only" path, which
+			// meant the user picked a webcam and saw a black placeholder
+			// until they flipped a dock toggle they didn't know about.
+			if (!mediaStream) {
+				try {
+					mediaStream = await navigator.mediaDevices.getUserMedia({
+						video: { deviceId: { exact: picked.deviceId } },
+						audio: false,
+					});
+					cameraOff = false;
+				} catch (err) {
+					toast(`Camera failed: ${userMessageFor(err)}`, "error");
+					return null;
 				}
 			}
 			break;
