@@ -159,5 +159,32 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: artifacts/**/*.tar.gz
+          # Prepended before the auto-generated "What's Changed" block.
+          # Saves every downloader from rediscovering the Gatekeeper
+          # workaround.
+          body: |
+            ## First-run on macOS
+
+            Release builds are ad-hoc signed, not notarized (the Apple Developer Program is $99/yr we haven't spent). macOS Gatekeeper marks any unsigned app downloaded from the internet as "damaged" on first launch. Clear the quarantine bit once and the app runs normally:
+
+            ```sh
+            xattr -dr com.apple.quarantine /path/to/weclank-canary.app
+            ```
+
+            On older macOS versions, right-click → **Open** also works (the prompt offers an "Open Anyway" button that a normal double-click doesn't). Same flow as any open-source Mac app distributed outside the App Store.
+
+            ## First-run on Linux
+
+            ```sh
+            tar -xzf weclank-${{ env.RELEASE_TAG }}-linux-x64.tar.gz
+            cd canary-linux-x64/weclank-canary
+            ./launcher
+            ```
+
+            `ffmpeg` must be on `$PATH` for RTMP egress.
+
+            ## First-run on Windows
+
+            SmartScreen will warn about an "unrecognized app" — click **More info** → **Run anyway**. Same un-notarized reason as macOS.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

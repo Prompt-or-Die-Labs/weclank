@@ -4,6 +4,7 @@
 import { Modal, toast } from "./overlays";
 import { escapeHtml } from "./primitives";
 import { openCarrotConsentDialog } from "./carrot-consent-dialog";
+import { openConfirmDialog } from "./input-dialog";
 import { bunRpc } from "../rpc";
 import { userMessageFor } from "../core/errors";
 
@@ -136,7 +137,13 @@ function wireRowActions(list: HTMLElement, refresh: () => Promise<void>): void {
 			}
 		});
 		row.querySelector<HTMLButtonElement>("[data-action=uninstall]")?.addEventListener("click", async () => {
-			if (!window.confirm(`Uninstall ${id}?`)) return;
+			const ok = await openConfirmDialog({
+				title: "Uninstall carrot",
+				body: `Uninstall ${id}?`,
+				confirmLabel: "Uninstall",
+				destructive: true,
+			});
+			if (!ok) return;
 			try {
 				const res = await bunRpc.carrotUninstall({ id });
 				if (!res.ok) throw new Error(res.error ?? "uninstall failed");

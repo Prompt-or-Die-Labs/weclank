@@ -42,6 +42,21 @@ function resize(src: string, dst: string, size: number): void {
 	run("sips", ["-Z", String(size), "-s", "format", "png", src, "--out", dst]);
 }
 
+// Zoom the artwork inside the icon canvas by center-cropping the source
+// PNG before downscaling. The user's source PNGs have a built-in border
+// of empty/neutral pixels around the logo; cropping makes the visible
+// glyph bigger in the rendered icon.
+function centerCrop(src: string, dst: string, fraction: number): void {
+	mkdirSync(dirname(dst), { recursive: true });
+	// sips reads the input's pixel dimensions; we crop relative to those.
+	const probe = spawnSync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", src], { encoding: "utf-8" });
+	const w = Number(probe.stdout.match(/pixelWidth:\s*(\d+)/)?.[1] ?? 0);
+	const h = Number(probe.stdout.match(/pixelHeight:\s*(\d+)/)?.[1] ?? 0);
+	if (!w || !h) throw new Error(`sips probe failed for ${src}`);
+	const side = Math.floor(Math.min(w, h) * fraction);
+	run("sips", ["-c", String(side), String(side), "-s", "format", "png", src, "--out", dst]);
+}
+
 // Multi-resolution .ico: header (6 bytes) + N directory entries (16 bytes
 // each) + concatenated PNG data. Modern Windows accepts PNG-compressed
 // entries — much simpler than packing 32-bit BMPs.
@@ -80,10 +95,20 @@ const trayPng = extractPng(join(SRC_DIR, "trayicon.svg"));
 const tmpDir = join(OUT_DIR, ".tmp");
 if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true });
 mkdirSync(tmpDir, { recursive: true });
-const appPngTmp = join(tmpDir, "app-1004.png");
-const trayPngTmp = join(tmpDir, "tray-1004.png");
-writeFileSync(appPngTmp, appPng);
-writeFileSync(trayPngTmp, trayPng);
+const appPngFull = join(tmpDir, "app-full.png");
+const trayPngFull = join(tmpDir, "tray-full.png");
+writeFileSync(appPngFull, appPng);
+writeFileSync(trayPngFull, trayPng);
+
+// Center-crop the artwork before resizing so the glyph fills more of the
+// rendered icon. 0.78 = keep the middle 78% of each axis (drops ~11% of
+// padding off every side). Tweak here if the user wants more/less zoom.
+const APP_CROP = 0.78;
+const TRAY_CROP = 0.7;
+const appPngTmp = join(tmpDir, "app-cropped.png");
+const trayPngTmp = join(tmpDir, "tray-cropped.png");
+centerCrop(appPngFull, appPngTmp, APP_CROP);
+centerCrop(trayPngFull, trayPngTmp, TRAY_CROP);
 
 // 2. macOS .iconset — the ten sizes Apple's iconutil expects.
 const iconset = join(OUT_DIR, "icon.iconset");
@@ -123,10 +148,11 @@ const icoPath = join(OUT_DIR, "icon.ico");
 buildIco(icoPngs, icoPath);
 console.log(`✓ wrote ${icoPath} (sizes: ${icoSizes.join(", ")})`);
 
-// 5. Tray icon — 64×64 (renders at 16pt with a 4× safety margin for
-// retina); Electrobun's Tray renders it at 16×16 logical.
+// 5. Tray icon — render at 88px (= 22pt @4× retina) so the menubar
+// glyph has the same chunky presence as Discord/Slack/Linear, not
+// the postage-stamp we got at the default 16pt size.
 const trayOut = join(OUT_DIR, "trayicon.png");
-resize(trayPngTmp, trayOut, 64);
+resize(trayPngTmp, trayOut, 88);
 console.log(`✓ wrote ${trayOut}`);
 
 // 6. Cleanup.

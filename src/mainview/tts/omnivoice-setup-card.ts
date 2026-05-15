@@ -15,6 +15,7 @@
 
 import { bunRpc } from "../rpc";
 import { toast } from "../components/overlays";
+import { openConfirmDialog } from "../components/input-dialog";
 import { userMessageFor } from "../core/errors";
 
 type StepState = "pending" | "ok" | "needs" | "working" | "blocked";
@@ -147,8 +148,13 @@ export function mountOmnivoiceSetupCard(host: HTMLElement): OmnivoiceSetupCard {
 			btn.addEventListener("click", () => void runAction("install", "Installing OmniVoice…"));
 		});
 		root.querySelectorAll<HTMLButtonElement>("[data-action=prepare]").forEach((btn) => {
-			btn.addEventListener("click", () => {
-				if (!window.confirm("Download the OmniVoice model weights (~660 MB)? This can take a few minutes.")) return;
+			btn.addEventListener("click", async () => {
+				const ok = await openConfirmDialog({
+					title: "Download OmniVoice model?",
+					body: "About 660 MB of model weights — this can take a few minutes.",
+					confirmLabel: "Download",
+				});
+				if (!ok) return;
 				void runAction("prepare", "Downloading model weights — this can take a few minutes.");
 			});
 		});

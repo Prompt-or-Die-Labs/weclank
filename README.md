@@ -43,6 +43,16 @@ bun check                # green-bar gate (typecheck + lint + tests)
 
 First launch: splash → create-account → studio. Sticky login on subsequent launches.
 
+## macOS first-run
+
+Release builds are ad-hoc signed, not notarized — running them on Apple Silicon costs $99/yr we haven't spent. macOS Gatekeeper marks any unsigned app downloaded from the internet as "damaged" on first launch. Clear the quarantine bit once and the app runs normally:
+
+```sh
+xattr -dr com.apple.quarantine /path/to/weclank-canary.app
+```
+
+On older macOS versions a right-click → **Open** also works (the prompt offers an "Open Anyway" button that double-click doesn't). Same threat-model story as any open-source Mac app distributed outside the App Store — VS Code OSS, OBS dev builds, etc. all hit the same flow.
+
 ## Where your data lives
 
 | OS | Path |

@@ -2437,12 +2437,16 @@ function installNativeShell(): void {
 		if (action) handleNativeMenuAction(action);
 	});
 	tray = new Tray({
-		title: "Weclank",
+		// Icon-only in the menubar — no "Weclank" text next to the glyph.
 		// `template: true` lets macOS auto-invert the icon for dark/light
 		// menubars; on Linux/Windows it's drawn as-is. The PNG is copied
 		// into the bundle at views/icons/trayicon.png via electrobun.config.
+		// 22pt is the macOS menubar height — Electrobun scales the PNG to
+		// fit, so we want the canvas big enough to use it.
 		image: "views://icons/trayicon.png",
 		template: true,
+		width: 22,
+		height: 22,
 	});
 	tray.setMenu(buildTrayMenu());
 	tray.on("tray-clicked", (event) => {
