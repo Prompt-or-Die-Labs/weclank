@@ -100,6 +100,59 @@ if (typeof globalThis.AudioWorkletNode === "undefined") {
 	void 0;
 }
 
+// HTMLCanvasElement.getContext — happy-dom returns null for "2d" in
+// some versions, which trips stream-engine.ts:42 at module load any
+// time something imports streamEngine. Stub a zero-effort 2D context
+// so the import chain doesn't blow up. Tests that actually render
+// pixels can mock at the test site.
+if (typeof HTMLCanvasElement !== "undefined") {
+	const original = HTMLCanvasElement.prototype.getContext;
+	const noopCtx2d = (): unknown => ({
+		canvas: null as unknown,
+		fillStyle: "",
+		strokeStyle: "",
+		globalAlpha: 1,
+		font: "",
+		textAlign: "start",
+		textBaseline: "alphabetic",
+		clearRect(): void {},
+		fillRect(): void {},
+		strokeRect(): void {},
+		drawImage(): void {},
+		fillText(): void {},
+		strokeText(): void {},
+		measureText(): { width: number } { return { width: 0 }; },
+		beginPath(): void {},
+		closePath(): void {},
+		moveTo(): void {},
+		lineTo(): void {},
+		arc(): void {},
+		rect(): void {},
+		fill(): void {},
+		stroke(): void {},
+		save(): void {},
+		restore(): void {},
+		translate(): void {},
+		scale(): void {},
+		rotate(): void {},
+		setTransform(): void {},
+		resetTransform(): void {},
+		getImageData(): { data: Uint8ClampedArray; width: number; height: number } {
+			return { data: new Uint8ClampedArray(0), width: 0, height: 0 };
+		},
+		putImageData(): void {},
+		createImageData(): { data: Uint8ClampedArray; width: number; height: number } {
+			return { data: new Uint8ClampedArray(0), width: 0, height: 0 };
+		},
+	});
+	HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string): unknown {
+		const real = original?.call(this, type as "2d");
+		if (real) return real;
+		if (type === "2d") return noopCtx2d();
+		return null;
+	} as typeof HTMLCanvasElement.prototype.getContext;
+}
+
 // Electrobun preload — the real one runs before the renderer JS loads
 // and injects `window.__electrobun` with IPC plumbing. In tests we stub
 // it with no-op pumps so rpc.ts can instantiate `new Electroview(...)`
