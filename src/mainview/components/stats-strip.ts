@@ -13,7 +13,7 @@ import { banterEngine } from "../banter/banter-engine";
 import { micTranscriber } from "../transcription/mic-transcriber";
 import { toast } from "./overlays";
 
-export type Lifecycle = "idle" | "live" | "reconnecting" | "failed";
+export type Lifecycle = "idle" | "starting" | "live" | "reconnecting" | "failed";
 
 /** Pure helper — given the two RPC responses + the last-seen error
  *  timestamp, return the state patch and an optional toast directive.
@@ -32,6 +32,7 @@ export function reduceStatsPoll(
 		severity?: "fatal" | "transient" | "info";
 	},
 	prevLastErrorAt: number,
+	prevLifecycle: Lifecycle = "idle",
 ): {
 	patch: {
 		bitrateKbps: number;
@@ -47,7 +48,10 @@ export function reduceStatsPoll(
 		bitrateKbps: stats.bitrateKbps ?? 0,
 		droppedFrames: stats.droppedFrames ?? 0,
 		timeSeconds: stats.timeSeconds ?? 0,
-		lifecycle: (stats.lifecycle ?? "live") as Lifecycle,
+		// Fall back to `starting` rather than `live` — better to show
+		// CONNECTING during the initial-poll gap than to fake a green
+		// pill before ffmpeg has actually emitted any progress.
+		lifecycle: (stats.lifecycle ?? "starting") as Lifecycle,
 		reconnectAttempt: stats.reconnectAttempt,
 	};
 	if (error.message && error.at && error.at > prevLastErrorAt) {
@@ -58,6 +62,16 @@ export function reduceStatsPoll(
 				tone: error.severity === "transient" ? "info" : "error",
 			},
 			lastErrorAt: error.at,
+		};
+	}
+	// Promotion `starting` → `live` is the canonical "ffmpeg actually
+	// connected and is producing bytes" signal — that's the right
+	// moment to say "live", not when the spawn call returned.
+	if (prevLifecycle === "starting" && patch.lifecycle === "live") {
+		return {
+			patch,
+			toast: { message: "Live — broadcasting", tone: "success" },
+			lastErrorAt: prevLastErrorAt,
 		};
 	}
 	return { patch, lastErrorAt: prevLastErrorAt };
@@ -171,7 +185,7 @@ export class StatsStrip extends Component<State> {
 				bunRpc.getStreamStats({}),
 				bunRpc.getStreamError({}),
 			]);
-			const result = reduceStatsPoll(stats, err, this.lastErrorAt);
+			const result = reduceStatsPoll(stats, err, this.lastErrorAt, this.state.lifecycle);
 			this.setState(result.patch);
 			this.lastErrorAt = result.lastErrorAt;
 			if (result.toast) toast(result.toast.message, result.toast.tone);
@@ -184,12 +198,14 @@ export class StatsStrip extends Component<State> {
 function pillLabelFor(lifecycle: Lifecycle, live: boolean, attempt?: number): string {
 	if (lifecycle === "reconnecting") return `RECONNECTING${attempt ? ` (${attempt})` : ""}`;
 	if (lifecycle === "failed") return "FAILED";
+	if (lifecycle === "starting") return "CONNECTING…";
 	return live ? "LIVE" : "IDLE";
 }
 
 function pillClassFor(lifecycle: Lifecycle, live: boolean): string {
 	if (lifecycle === "reconnecting") return "stats-cell--reconnecting";
 	if (lifecycle === "failed") return "stats-cell--failed";
+	if (lifecycle === "starting") return "stats-cell--reconnecting";
 	return live ? "stats-cell--live" : "";
 }
 

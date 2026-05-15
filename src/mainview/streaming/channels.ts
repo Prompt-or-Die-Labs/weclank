@@ -62,6 +62,14 @@ export const PLATFORM_RTMP_PREFIX: Record<PlatformId, string> = {
 	custom:    "",
 };
 
+/** Platforms whose RTMP ingest is only available to verified / partner /
+ * business accounts. The link dialog surfaces a prominent warning for
+ * these — too many people pick "X" thinking it'll work and only find
+ * out after they hit Go Live that their stream goes nowhere. */
+export const RESTRICTED_PLATFORMS: ReadonlySet<PlatformId> = new Set([
+	"x", "tiktok", "instagram", "linkedin", "rumble",
+]);
+
 /** Setup hints shown in the link-channel dialog for each platform. For the
  * well-known platforms with static endpoints, the URL prefills and no
  * hint is needed. For per-user / restricted platforms, this is where the

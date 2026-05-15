@@ -144,6 +144,10 @@ describe.skipIf(!HAS_FFMPEG)("egress LIVE loopback (real RTMP end-to-end)", () =
 			});
 
 			await sup.start();
+			// Supervisor lands in `starting`; production promotes to `live`
+			// once ffmpeg emits its first `-progress pipe:1` block. This
+			// test exercises the lifecycle by simulating that callback.
+			sup.noteActivity();
 			expect(sup.getState().kind).toBe("live");
 
 			// Feed the seed WebM in. Split into small chunks to
@@ -184,6 +188,7 @@ describe.skipIf(!HAS_FFMPEG)("egress LIVE loopback (real RTMP end-to-end)", () =
 			});
 			const sup = createEgressSupervisor({ args, env: augmentedProcessEnv() });
 			await sup.start();
+			sup.noteActivity();
 			expect(sup.getState().kind).toBe("live");
 
 			// Push at least one chunk so the RTMP handshake completes.
@@ -235,6 +240,7 @@ describe.skipIf(!HAS_FFMPEG)("egress LIVE loopback (real RTMP end-to-end)", () =
 			});
 
 			await sup.start();
+			sup.noteActivity();
 			await sup.write(seedWebm!.subarray(0, 4096));
 			await new Promise((r) => setTimeout(r, 400));
 			expect(sup.getState().kind).toBe("live");

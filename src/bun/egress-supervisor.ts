@@ -25,6 +25,14 @@ import { withBackoff } from "../shared/retry";
 
 export type EgressLifecycleState =
 	| { kind: "idle" }
+	// ffmpeg has been spawned and survived the 200ms quick-death window,
+	// but hasn't yet emitted a progress block (= no bytes have actually
+	// hit the RTMP receiver). Most RTMP rejections happen here:
+	// "Connection refused", "401", "stream key invalid", an X account
+	// without Producer access etc. We DELIBERATELY don't claim "live"
+	// during this window — the LIVE pill and the "Live on N" toast both
+	// gate on the live transition below.
+	| { kind: "starting"; sinceMs: number }
 	| { kind: "live"; sinceMs: number; restarts: number }
 	| { kind: "reconnecting"; attempt: number; sinceMs: number; lastError?: string }
 	| { kind: "failed"; sinceMs: number; lastError: string };
@@ -57,6 +65,16 @@ export interface SupervisorOptions {
 	 *  legitimate slow encoder ticks don't trigger it; short enough
 	 *  that dead-RTMP-receiver is caught in <15s end-to-end. */
 	staleTimeoutMs?: number;
+	/** Connect-timeout. If a freshly-spawned ffmpeg sits in `starting`
+	 *  for this many ms without ever emitting a progress block, the
+	 *  supervisor SIGKILLs it. The exit-watcher then triggers respawn,
+	 *  and the stderr classifier's `lastError` (e.g. "Connection refused",
+	 *  "Stream key invalid") is what the renderer toasts.
+	 *
+	 *  Catches the X-without-Producer-access failure mode: the TCP
+	 *  socket connects, the RTMP handshake stalls, ffmpeg sits there
+	 *  with stdin filling and never produces output. Default 8_000ms. */
+	connectTimeoutMs?: number;
 }
 
 export interface Supervisor {
@@ -97,6 +115,7 @@ export function createEgressSupervisor(opts: SupervisorOptions): Supervisor {
 	const maxDelay = opts.maxReconnectDelayMs ?? 15 * 60 * 1000;
 	const maxAttempts = opts.maxReconnectAttempts ?? 20;
 	const staleTimeoutMs = opts.staleTimeoutMs ?? 10_000;
+	const connectTimeoutMs = opts.connectTimeoutMs ?? 8_000;
 
 	let state: EgressLifecycleState = { kind: "idle" };
 	let active: ActiveProc | null = null;
@@ -105,6 +124,9 @@ export function createEgressSupervisor(opts: SupervisorOptions): Supervisor {
 	 *  the live → reconnecting → live cycles so the renderer can show
 	 *  "reconnected #3" honestly. Reset on each fresh start(). */
 	let restartCount = 0;
+	/** Restart counter to carry into the next `live` state once a
+	 *  `starting` spawn promotes via first-progress. */
+	let pendingRestarts = 0;
 	/** Wall-clock of the last observed ffmpeg activity (progress frame).
 	 *  -1 = not yet armed. The watchdog compares against this. */
 	let lastActivityAt = -1;
@@ -117,7 +139,7 @@ export function createEgressSupervisor(opts: SupervisorOptions): Supervisor {
 	};
 
 	const armWatchdog = (): void => {
-		if (staleTimeoutMs <= 0) return;
+		if (staleTimeoutMs <= 0 && connectTimeoutMs <= 0) return;
 		// Reset the timestamp on each fresh spawn so a slow first
 		// frame doesn't immediately trigger a kill.
 		lastActivityAt = Date.now();
@@ -125,15 +147,25 @@ export function createEgressSupervisor(opts: SupervisorOptions): Supervisor {
 		// Check every 1s; granularity finer than that wastes wakeups
 		// (a few seconds late is fine for a 10s threshold).
 		watchdogTimer = setInterval(() => {
+			const a = active;
+			if (!a) return;
+			// `starting` — never heard any progress yet. Kill if the
+			// connect-timeout has elapsed so the renderer toasts the
+			// classifier message instead of sitting on a fake LIVE pill.
+			if (state.kind === "starting") {
+				if (connectTimeoutMs <= 0) return;
+				const sinceSpawn = Date.now() - state.sinceMs;
+				if (sinceSpawn < connectTimeoutMs) return;
+				try { a.proc.kill("SIGKILL"); } catch { /* may already be dead */ }
+				return;
+			}
+			// `live` — kill on extended silence (RTMP receiver died but
+			// ffmpeg's TCP buffer absorbed writes).
 			if (state.kind !== "live") return;
+			if (staleTimeoutMs <= 0) return;
 			if (lastActivityAt < 0) return;
 			const idleMs = Date.now() - lastActivityAt;
 			if (idleMs < staleTimeoutMs) return;
-			// Stale — kill the active proc. The exit-watcher will fire
-			// and trigger respawnLoop via the normal path.
-			const a = active;
-			if (!a) return;
-			// Mark so we don't double-trigger if kill is slow.
 			lastActivityAt = -1;
 			try { a.proc.kill("SIGKILL"); } catch { /* may already be dead */ }
 		}, 1_000);
@@ -213,11 +245,12 @@ export function createEgressSupervisor(opts: SupervisorOptions): Supervisor {
 					active = await spawnAndSettle();
 					attachExitWatcher(active.proc);
 					restartCount += 1;
-					setState({
-						kind: "live",
-						sinceMs: Date.now(),
-						restarts: restartCount,
-					});
+					// Land in `starting` — `noteActivity` will promote to
+					// `live` once ffmpeg emits its first progress block.
+					// The `restarts` counter is preserved across the
+					// promotion via `pendingRestarts`.
+					pendingRestarts = restartCount;
+					setState({ kind: "starting", sinceMs: Date.now() });
 					armWatchdog();
 				},
 				{
@@ -269,9 +302,10 @@ export function createEgressSupervisor(opts: SupervisorOptions): Supervisor {
 			}
 			stopRequested = false;
 			restartCount = 0;
+			pendingRestarts = 0;
 			active = await spawnAndSettle();
 			attachExitWatcher(active.proc);
-			setState({ kind: "live", sinceMs: Date.now(), restarts: 0 });
+			setState({ kind: "starting", sinceMs: Date.now() });
 			armWatchdog();
 		},
 
@@ -309,6 +343,17 @@ export function createEgressSupervisor(opts: SupervisorOptions): Supervisor {
 		noteActivity(): void {
 			if (staleTimeoutMs > 0) {
 				lastActivityAt = Date.now();
+			}
+			// First progress block — promote `starting` → `live`. This is
+			// the only signal that bytes actually reached the RTMP
+			// receiver, so it's also the only signal the renderer should
+			// trust to say "you're live."
+			if (state.kind === "starting") {
+				setState({
+					kind: "live",
+					sinceMs: Date.now(),
+					restarts: pendingRestarts,
+				});
 			}
 		},
 	};

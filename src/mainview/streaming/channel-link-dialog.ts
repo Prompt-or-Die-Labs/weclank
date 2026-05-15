@@ -9,7 +9,7 @@ import { Modal, toast } from "../components/overlays";
 import { Brands, BRAND_COLORS, BRAND_LABELS, Icons } from "../core/icons";
 import type { BrandId } from "../core/icons";
 import type { PlatformId, RtmpChannel } from "../core/types";
-import { addChannel, updateChannel, PLATFORM_HINTS, PLATFORM_RTMP_PREFIX } from "./channels";
+import { addChannel, updateChannel, PLATFORM_HINTS, PLATFORM_RTMP_PREFIX, RESTRICTED_PLATFORMS } from "./channels";
 import { userMessageFor } from "../core/errors";
 
 interface LinkOptions {
@@ -71,6 +71,11 @@ export function openChannelLinkDialog(options: LinkOptions = {}): Promise<RtmpCh
 						<span class="channel-link__platform-label">Custom</span>
 					</button>
 				</div>
+				${RESTRICTED_PLATFORMS.has(platform) ? `
+					<p class="channel-link__hint channel-link__hint--warning">
+						<strong>⚠ Verified / partner-only:</strong> ${BRAND_LABELS[platform as keyof typeof BRAND_LABELS]} RTMP ingest isn't open to everyone. If you don't have access, your stream will spawn but no data will reach the platform.
+					</p>
+				` : ""}
 				<p class="channel-link__hint">${PLATFORM_HINTS[platform]}</p>
 				<label class="tts-config__row">
 					<span>Label</span>
