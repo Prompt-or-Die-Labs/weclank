@@ -73,7 +73,14 @@ export interface SupervisorOptions {
 	 *
 	 *  Catches the X-without-Producer-access failure mode: the TCP
 	 *  socket connects, the RTMP handshake stalls, ffmpeg sits there
-	 *  with stdin filling and never produces output. Default 8_000ms. */
+	 *  with stdin filling and never produces output.
+	 *
+	 *  Default 20_000ms — sized for the worst-case path: libx264
+	 *  software fallback at 1080p30 (VideoToolbox probe failed) +
+	 *  first MediaRecorder chunk arriving 1s after spawn +
+	 *  RTMPS handshake on a real platform. The previous 8s was too
+	 *  tight and SIGKILL'd ffmpeg before it could finish the
+	 *  handshake. */
 	connectTimeoutMs?: number;
 }
 
@@ -115,7 +122,7 @@ export function createEgressSupervisor(opts: SupervisorOptions): Supervisor {
 	const maxDelay = opts.maxReconnectDelayMs ?? 15 * 60 * 1000;
 	const maxAttempts = opts.maxReconnectAttempts ?? 20;
 	const staleTimeoutMs = opts.staleTimeoutMs ?? 10_000;
-	const connectTimeoutMs = opts.connectTimeoutMs ?? 8_000;
+	const connectTimeoutMs = opts.connectTimeoutMs ?? 20_000;
 
 	let state: EgressLifecycleState = { kind: "idle" };
 	let active: ActiveProc | null = null;

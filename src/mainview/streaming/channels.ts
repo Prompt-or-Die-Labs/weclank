@@ -34,10 +34,14 @@ export const PLATFORM_RTMP_PREFIX: Record<PlatformId, string> = {
 	youtube:   "rtmp://a.rtmp.youtube.com/live2",
 	facebook:  "rtmps://live-api-s.facebook.com:443/rtmp/",
 	rumble:    "rtmp://live.rumble.com/live",
-	// X (Twitter) Live uses Producer/Media Studio endpoints. Only verified
-	// users get access; the URL has historically been
-	// rtmp://global-live.twitter.com:443/app/.
-	x:         "rtmp://global-live.twitter.com:443/app",
+	// X (Twitter) Live Producer hands out an RTMPS ingest under
+	// `pscp.tv` (the legacy Periscope CDN that X still uses for live).
+	// `va` is the US-East region — Producer also offers other regions
+	// (eu / sg / au …) so users with Producer access who get a
+	// different region should overwrite the URL the dialog prefills.
+	// The old `global-live.twitter.com:443/app` value was the
+	// dev-portal placeholder; nothing ever streamed there.
+	x:         "rtmps://va.pscp.tv:443/x",
 	// Kick assigns a personalized live-video.net endpoint per user. There
 	// is no single static URL — the user copies theirs from their Stream
 	// Manager and pastes it in.
@@ -65,7 +69,11 @@ export const PLATFORM_RTMP_PREFIX: Record<PlatformId, string> = {
 /** Platforms whose RTMP ingest is only available to verified / partner /
  * business accounts. The link dialog surfaces a prominent warning for
  * these — too many people pick "X" thinking it'll work and only find
- * out after they hit Go Live that their stream goes nowhere. */
+ * out after they hit Go Live that their stream goes nowhere.
+ *
+ * X stays on this list — Producer access is still verified-only — but
+ * the URL prefill now points at the real pscp.tv ingest so users who
+ * DO have access don't have to hand-edit it. */
 export const RESTRICTED_PLATFORMS: ReadonlySet<PlatformId> = new Set([
 	"x", "tiktok", "instagram", "linkedin", "rumble",
 ]);
@@ -79,7 +87,7 @@ export const PLATFORM_HINTS: Record<PlatformId, string> = {
 	youtube:   "Copy your stream key from YouTube Studio → Go Live → Stream.",
 	facebook:  "Use Facebook Live Producer (facebook.com/live/producer) → Streaming Software → copy URL + key.",
 	rumble:    "Requires verified account. Copy from rumble.com → Studio → Live Stream → Custom Live Stream.",
-	x:         "Requires Producer / Media Studio access. Copy URL + key from media.x.com → Producer.",
+	x:         "Requires Producer access. Copy the RTMPS URL + key from media.x.com → your source. Producer assigns a region (va / eu / sg / au …) — if yours isn't `va`, edit the URL below to match the region Producer shows.",
 	kick:      "Personalized URL per account. Copy from Kick → Stream Manager → Stream Setup.",
 	tiktok:    "Requires TikTok LIVE Studio app or partner approval. Use the dynamic URL from your LIVE setup.",
 	instagram: "Live Producer is Meta Business / Creator accounts only. Copy URL + key from instagram.com → Live.",
