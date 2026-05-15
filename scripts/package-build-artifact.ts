@@ -32,10 +32,14 @@ if (!best) {
 	process.exit(1);
 }
 
-const out = join(process.cwd(), `weclank-${tag}-${suffix}.tar.gz`);
-const tar = spawnSync("tar", ["-czf", out, "-C", buildDir, best], { stdio: "inherit" });
+// Use a relative output filename so MSYS2's tar on Windows doesn't
+// mis-parse the drive letter in an absolute path (`D:\a\...`) as an
+// rsh-style `host:path`. `--force-local` would also work but a plain
+// relative name avoids the platform quirk entirely.
+const outRel = `weclank-${tag}-${suffix}.tar.gz`;
+const tar = spawnSync("tar", ["-czf", outRel, "-C", buildDir, best], { stdio: "inherit" });
 if (tar.status !== 0) {
 	console.error("package-build-artifact: tar failed");
 	process.exit(1);
 }
-console.log(out);
+console.log(join(process.cwd(), outRel));
