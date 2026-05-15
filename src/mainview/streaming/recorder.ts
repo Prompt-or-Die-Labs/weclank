@@ -249,6 +249,12 @@ function participantHasRecordableVideo(participant: Participant): boolean {
 		case "voice-vrm":
 		case "voice-glb":
 			return true;
+		case "browser":
+			// Browser source is local-preview-only in phase 1 (cross-origin
+			// canvas tainting). Treat as not-recordable so going live
+			// without other sources surfaces the real "no recordable video"
+			// state instead of a silent blank tile.
+			return false;
 		case "mic":
 		case "text":
 			return false;

@@ -23,6 +23,7 @@ import { serializeState } from "../state/persistence";
 import type { StudioFocusMode } from "../core/types";
 import { openSceneImportDialog } from "./scene-import-dialog";
 import { openCarrotsPanel } from "./carrots-panel";
+import { openObsWsSettingsDialog } from "./obs-ws-settings-dialog";
 
 type UtilityKind = "studio" | "chat" | "producer" | "stats" | "overlay" | "prompter";
 
@@ -100,6 +101,9 @@ export function openSettingsDialog(): void {
 	body.querySelector<HTMLButtonElement>("[data-action=import-scenes]")?.addEventListener("click", () => {
 		modal.close();
 		openSceneImportDialog();
+	});
+	body.querySelector<HTMLButtonElement>("[data-action=obs-ws]")?.addEventListener("click", () => {
+		void openObsWsSettingsDialog();
 	});
 	body.querySelector<HTMLButtonElement>("[data-action=carrots]")?.addEventListener("click", () => {
 		modal.close();
@@ -184,6 +188,16 @@ function renderSettings(): string {
 			<div class="settings-grid settings-grid--two">
 				<button type="button" class="settings-action" data-action="screen">Add screen capture</button>
 				<button type="button" class="settings-action" data-action="record">${studio.state.stream.recording || localRecorder.isRecording ? "Stop recording" : "Start recording"}</button>
+			</div>
+		</section>
+
+		<section class="settings-section">
+			<div class="settings-section__head">
+				<h3>External controllers</h3>
+				<p>Let Stream Deck, Companion, Touch Portal, or any obs-websocket v5 client switch scenes / start streams from a physical device. Local-only by default; LAN exposure requires a password.</p>
+			</div>
+			<div class="settings-grid settings-grid--two">
+				<button type="button" class="settings-action" data-action="obs-ws">Stream Deck / obs-websocket…</button>
 			</div>
 		</section>
 

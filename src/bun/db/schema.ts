@@ -8,13 +8,7 @@
 
 import { Database } from "bun:sqlite";
 import { mkdir, chmod } from "node:fs/promises";
-
-function userDataDir(): string {
-	const home = Bun.env["HOME"] ?? "";
-	if (process.platform === "darwin") return `${home}/Library/Application Support/Weclank`;
-	if (process.platform === "win32") return `${Bun.env["APPDATA"] ?? home}/Weclank`;
-	return `${Bun.env["XDG_CONFIG_HOME"] ?? `${home}/.config`}/weclank`;
-}
+import { userDataDir } from "../paths";
 
 let db: Database | null = null;
 

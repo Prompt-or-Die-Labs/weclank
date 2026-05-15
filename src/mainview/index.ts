@@ -23,6 +23,7 @@ import { hydrateFromUser } from "./state/persistence";
 import { studio } from "./state/studio-store";
 import { initTheme } from "./components/theme";
 import { installHotkeys } from "./components/hotkeys";
+import { startObsBridge } from "./obs-ws-bridge";
 import { mountUtilityWindow, parseUtilityWindowKind, type UtilityWindowKind } from "./components/utility-window";
 import { installNativeContextMenu } from "./components/native-context-menu";
 import { SetupChecklistStrip } from "./components/setup-strip";
@@ -115,6 +116,10 @@ function mountShell(): void {
 	new ProducerTray().mount(document.body);
 
 	installHotkeys();
+	// The renderer half of the obs-ws bridge — pushes state snapshots
+	// to Bun's mirror + polls for commands queued by Stream Deck /
+	// Companion clients. No-op if the obs-ws server isn't enabled.
+	startObsBridge();
 
 	if (shouldOfferFirstRunWizard()) {
 		queueMicrotask(() => openSetupWizard());

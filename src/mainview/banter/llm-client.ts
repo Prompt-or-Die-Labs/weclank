@@ -14,7 +14,7 @@ import {
 } from "../auth/openai-codex-oauth";
 import { ELIZACLOUD_API_KEY } from "../auth/elizacloud-api";
 import { ApiError, ConfigError } from "../core/errors";
-import { withBackoff, isRetryableStatus } from "../core/retry";
+import { withBackoff, isRetryableStatus } from "../../shared/retry";
 import type { BanterLlmProvider } from "../core/types";
 import type { ToolDefinition } from "./tools";
 

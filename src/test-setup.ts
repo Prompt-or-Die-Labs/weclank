@@ -59,6 +59,24 @@ class StubAudioContext extends StubAudioNode {
 	createBufferSource(): StubAudioNode & { buffer: unknown; start(): void; stop(): void; onended: null } {
 		return Object.assign(new StubAudioNode(), { buffer: null, start(): void {}, stop(): void {}, onended: null });
 	}
+	createDynamicsCompressor(): StubAudioNode & {
+		threshold: { value: number };
+		knee: { value: number };
+		ratio: { value: number };
+		attack: { value: number };
+		release: { value: number };
+	} {
+		return Object.assign(new StubAudioNode(), {
+			threshold: { value: 0 },
+			knee: { value: 0 },
+			ratio: { value: 0 },
+			attack: { value: 0 },
+			release: { value: 0 },
+		});
+	}
+	createDelay(_maxDelayTime?: number): StubAudioNode & { delayTime: { value: number } } {
+		return Object.assign(new StubAudioNode(), { delayTime: { value: 0 } });
+	}
 	resume(): Promise<void> { return Promise.resolve(); }
 	close(): Promise<void> { return Promise.resolve(); }
 	get audioWorklet(): { addModule(): Promise<void> } {
@@ -67,6 +85,19 @@ class StubAudioContext extends StubAudioNode {
 }
 if (typeof globalThis.AudioContext === "undefined") {
 	(globalThis as unknown as { AudioContext: typeof StubAudioContext }).AudioContext = StubAudioContext;
+}
+
+// AudioWorkletNode stub — modules that try to construct worklets at
+// load time (e.g. audio-filters with noise gate) need this so they
+// don't blow up before the bypass-fallback kicks in. In real tests
+// of the worklet itself, mock at the test site.
+class StubAudioWorkletNode extends StubAudioNode {
+	parameters = new Map<string, { value: number }>();
+	port = { postMessage(): void {}, close(): void {}, onmessage: null as unknown };
+}
+if (typeof globalThis.AudioWorkletNode === "undefined") {
+	(globalThis as unknown as { AudioWorkletNode: typeof StubAudioWorkletNode }).AudioWorkletNode = StubAudioWorkletNode;
+	void 0;
 }
 
 // Electrobun preload — the real one runs before the renderer JS loads

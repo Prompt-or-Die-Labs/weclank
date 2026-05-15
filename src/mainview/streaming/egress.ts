@@ -11,8 +11,12 @@ import { streamEngine } from "./stream-engine";
 import { bunRpc } from "../rpc";
 import { studio } from "../state/studio-store";
 import { IpcError, StudioError } from "../core/errors";
+import { withBackoff } from "../../shared/retry";
 import { arrayBufferToBase64 } from "./base64";
 import { broadcastCapture, type CaptureSink } from "./capture";
+import { PRESETS } from "./presets";
+import { logger, metrics, setBroadcastSessionId, timed } from "../observability";
+import { replayBuffer } from "./replay-buffer";
 
 const CHUNK_INTERVAL_MS = 1_000;
 const EGRESS_SINK_ID = "egress";
@@ -38,10 +42,38 @@ class EgressController {
 			throw new StudioError("No destinations", "Add at least one RTMP destination before going live.");
 		}
 
-		const begin = await bunRpc.startStreamEgress({ destinations });
+		// Mint a session id so every log / metric / banter event during
+		// this broadcast carries the same correlation key.
+		const sessionId = `bx-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
+		setBroadcastSessionId(sessionId);
+
+		// Bun's ffmpeg picks its own (wrong) defaults if fps + bitrate
+		// don't come through with the start call. Pass them explicitly
+		// from the active preset.
+		const preset = PRESETS[studio.state.stream.quality];
+		const log = logger().withFields({
+			component: "egress",
+			quality: studio.state.stream.quality,
+			destinations: destinations.length,
+		});
+		log.info("starting egress");
+
+		const begin = await timed("egress_start", () =>
+			bunRpc.startStreamEgress({
+				destinations,
+				fps: preset.fps,
+				videoBitsPerSecond: preset.videoBitsPerSecond,
+				audioBitsPerSecond: preset.audioBitsPerSecond,
+			}),
+		);
 		if (!begin.success) {
+			metrics().incrementCounter("egress_start_failures_total");
+			setBroadcastSessionId(undefined);
 			throw new IpcError(begin.error || "Bun rejected the egress start", begin.error || "Couldn't start the local ffmpeg process. Is ffmpeg on PATH?");
 		}
+		metrics().incrementCounter("egress_starts_total", {
+			destinations: String(destinations.length),
+		});
 
 		this.writeChain = Promise.resolve();
 		const sink: CaptureSink = {
@@ -49,7 +81,16 @@ class EgressController {
 			onChunk: (blob) => {
 				this.writeChain = this.writeChain
 					.then(() => this.shipChunk(blob))
-					.catch((err) => console.warn("[egress] chunk push failed", err));
+					.catch((err) => logger().withError(err).warn("chunk push failed"));
+			},
+			onError: (err) => {
+				// MediaRecorder died mid-stream — chunks have stopped
+				// flowing. Surface immediately so the user knows the
+				// LIVE pill is lying. Egress will tear down on the
+				// existing capture-detach path.
+				metrics().incrementCounter("egress_capture_errors_total");
+				logger().withError(err).error("MediaRecorder error — broadcast halted");
+				void this.stopOnRecorderError(err);
 			},
 			onStop: async () => {
 				await this.writeChain;
@@ -63,10 +104,35 @@ class EgressController {
 				chunkIntervalMs: CHUNK_INTERVAL_MS,
 			});
 			this.attached = true;
+			log.info("egress live");
+			// Arm the replay buffer alongside egress. Awaiting so a
+			// failure to attach surfaces immediately rather than being
+			// silently swallowed by a fire-and-forget Promise. A
+			// broken buffer doesn't break the stream — degrade
+			// gracefully with a warn — but the *failure to know* is
+			// what the advisor caught.
+			try {
+				await replayBuffer.attach(streamEngine, studio.state.stream.quality);
+			} catch (err) {
+				logger().withError(err).warn("replay-buffer attach failed; stream continues without it");
+				metrics().incrementCounter("replay_buffer_attach_failures_total");
+			}
 		} catch (err) {
+			metrics().incrementCounter("egress_attach_failures_total");
 			await bunRpc.stopStreamEgress({});
+			setBroadcastSessionId(undefined);
 			throw err;
 		}
+	}
+
+	/** Triggered by capture.onError. Tear down + surface a toast so the
+	 *  user doesn't keep believing the broadcast is live. */
+	private async stopOnRecorderError(err: Error): Promise<void> {
+		try {
+			const { toast } = await import("../components/overlays");
+			toast(`Broadcast halted — capture failed: ${err.message}`, "error");
+		} catch { /* lazy import failed; skip the toast */ }
+		this.stop();
 	}
 
 	/** Fire-and-forget. Live=false flips immediately; ffmpeg drains in background. */
@@ -88,21 +154,57 @@ class EgressController {
 		try {
 			await broadcastCapture.detach(EGRESS_SINK_ID);
 		} catch (err) {
-			console.warn("[egress] capture detach failed", err);
+			logger().withError(err).warn("capture detach failed");
+		}
+		try {
+			await replayBuffer.detach();
+		} catch (err) {
+			logger().withError(err).warn("replay-buffer detach failed");
 		}
 		try {
 			await bunRpc.stopStreamEgress({});
 		} catch (err) {
-			console.warn("[egress] stop RPC failed", err);
+			logger().withError(err).warn("stop RPC failed");
 		}
+		logger().info("egress stopped");
+		setBroadcastSessionId(undefined);
 	}
 
 	private async shipChunk(blob: Blob): Promise<void> {
 		const buffer = await blob.arrayBuffer();
 		const base64 = arrayBufferToBase64(buffer);
-		const result = await bunRpc.pushStreamChunk({ base64 });
-		if (!result.ok) {
-			console.warn("[egress] chunk rejected", result.error);
+		// Up to 3 attempts with decorrelated-jitter backoff. A single
+		// transient Bun-side error (process briefly busy, RPC bus blip)
+		// used to silently drop 1s of video; this preserves it. After 3
+		// attempts the chunk is given up — losing 1s is preferable to
+		// stalling the rest of the broadcast.
+		try {
+			await withBackoff(
+				async () => {
+					const result = await bunRpc.pushStreamChunk({ base64 });
+					if (!result.ok) {
+						throw new IpcError(
+							result.error || "chunk rejected",
+							"Stream hiccup — retrying.",
+						);
+					}
+					return result;
+				},
+				{
+					maxAttempts: 3,
+					initialDelayMs: 200,
+					maxDelayMs: 2_000,
+					onAttemptFailed: (n, err) => {
+						metrics().incrementCounter("egress_chunk_retry_attempts_total", { attempt: String(n) });
+						logger().withError(err).warn(`chunk attempt ${n} failed`);
+					},
+				},
+			);
+			metrics().addCounter("egress_chunk_bytes_total", buffer.byteLength);
+			metrics().incrementCounter("egress_chunks_total");
+		} catch (err) {
+			metrics().incrementCounter("egress_chunk_rejects_total");
+			logger().withError(err).warn("chunk rejected after retries");
 		}
 	}
 }

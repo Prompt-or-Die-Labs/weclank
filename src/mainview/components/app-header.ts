@@ -11,14 +11,11 @@ import { Popover, toast } from "./overlays";
 import { connectOpenRouterOAuth, OPENROUTER_KEY } from "../auth/openrouter-oauth";
 import { openOpenAiApiKeyDialog, OPENAI_API_KEY } from "../auth/openai-api";
 import { hasSecret } from "../auth/secrets-cache";
-import { egressController } from "../streaming/egress";
 import { pickRtmpDestination } from "../streaming/rtmp-config-dialog";
-import { loadChannels, resolveActiveChannels } from "../streaming/channels";
-import { openChannelLinkDialog } from "../streaming/channel-link-dialog";
 import { localRecorder } from "../streaming/recorder";
-import { StudioError, userMessageFor } from "../core/errors";
+import { toggleBroadcast, toggleRecording as toggleRecordingAction, saveReplayBufferNow } from "../streaming/broadcast-actions";
+import { userMessageFor } from "../core/errors";
 import { bunRpc } from "../rpc";
-import { openGoLiveFailedDialog } from "./go-live-failed-dialog";
 import { openSettingsDialog } from "./settings-dialog";
 import { ChannelStrip } from "./channel-strip";
 
@@ -265,6 +262,7 @@ export class AppHeader extends Component<State> {
 		const quality = studio.state.stream.quality;
 		const menu = document.createElement("div");
 		menu.className = "menu";
+		const isLive = studio.state.stream.live;
 		menu.innerHTML = `
 			<div class="menu__section">Quality</div>
 			<button class="menu__item" data-quality="480p" aria-pressed="${quality === "480p"}"><span class="menu__icon" aria-hidden="true">${Icons.monitor(14)}</span><span>480p</span></button>
@@ -272,6 +270,7 @@ export class AppHeader extends Component<State> {
 			<button class="menu__item" data-quality="1080p" aria-pressed="${quality === "1080p"}"><span class="menu__icon" aria-hidden="true">${Icons.monitor(14)}</span><span>1080p</span></button>
 			<div class="menu__section">Recording</div>
 			<button class="menu__item" data-record="toggle"><span class="menu__icon" aria-hidden="true">${Icons.radio(14)}</span><span>${studio.state.stream.recording || localRecorder.isRecording ? "Stop local recording" : "Start local recording"}</span></button>
+			${isLive ? `<button class="menu__item" data-replay="save"><span class="menu__icon" aria-hidden="true">${Icons.radio(14)}</span><span>Save replay buffer</span><small>last ~60s · ⌘⇧B</small></button>` : `<button class="menu__item" disabled><span class="menu__icon" aria-hidden="true">${Icons.radio(14)}</span><span>Save replay buffer</span><small>only while live · ⌘⇧B</small></button>`}
 		`;
 		const popover = new Popover({ anchor, content: menu });
 		menu.querySelectorAll<HTMLButtonElement>("[data-quality]").forEach((btn) => {
@@ -286,61 +285,20 @@ export class AppHeader extends Component<State> {
 			popover.dismiss();
 			void this.toggleRecording();
 		});
+		menu.querySelector<HTMLButtonElement>("[data-replay]")?.addEventListener("click", () => {
+			popover.dismiss();
+			void saveReplayBufferNow();
+		});
 	}
 
 	private async toggleLive(): Promise<void> {
-		if (studio.state.stream.live) {
-			egressController.stop();
-			toast("Stream stopped");
-			return;
-		}
-		// `loadChannels()` migrates legacy `rtmp_destinations` in-memory, so a
-		// user with old destinations sees them surface as channels here.
-		const channels = loadChannels();
-		if (channels.length === 0) {
-			// First-time path — link a channel, then go live to it.
-			const created = await openChannelLinkDialog();
-			if (!created) return;
-			studio.setStream({ activeChannelIds: [created.id] });
-			return void this.startEgress([{ rtmpUrl: created.rtmpUrl, streamKey: created.streamKey }]);
-		}
-		const targets = resolveActiveChannels(studio.state.stream.activeChannelIds);
-		if (targets.length === 0) {
-			toast("Pick at least one channel in the header strip", "error");
-			return;
-		}
-		// Multi-destination: ffmpeg's tee muxer fans the same encode out
-		// to every channel in one process. Twitch + X + YouTube + … all
-		// share the encode cost.
-		await this.startEgress(targets.map(({ rtmpUrl, streamKey }) => ({ rtmpUrl, streamKey })));
-	}
-
-	private async startEgress(destinations: { rtmpUrl: string; streamKey: string }[]): Promise<void> {
-		const count = destinations.length;
-		toast(`Connecting to ${count} destination${count > 1 ? "s" : ""}…`, "info");
-		try {
-			await egressController.start(destinations);
-			studio.setStream({ live: true });
-			toast(`Live on ${count} destination${count > 1 ? "s" : ""}`, "success");
-		} catch (err) {
-			const detail = err instanceof StudioError ? err.message : userMessageFor(err);
-			openGoLiveFailedDialog(detail);
-		}
+		// All Go Live / Stop logic lives in broadcast-actions.ts so
+		// obs-ws, hotkeys, and the command palette share one impl.
+		await toggleBroadcast();
 	}
 
 	private async toggleRecording(): Promise<void> {
-		const recording = studio.state.stream.recording || localRecorder.isRecording;
-		if (recording) {
-			localRecorder.stop();
-			return;
-		}
-		try {
-			const started = await localRecorder.start();
-			if (!started) return;
-			toast("Recording to disk", "success");
-		} catch (err) {
-			toast(`Recording failed: ${userMessageFor(err)}`, "error");
-		}
+		await toggleRecordingAction();
 	}
 }
 

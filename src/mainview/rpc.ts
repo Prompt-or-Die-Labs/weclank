@@ -40,7 +40,7 @@ const rpc = Electroview.defineRPC<PhotoBoothRPC>({
 				void toggleRecordingFromNativeMenu();
 			},
 			nativeToggleLive: () => {
-				document.getElementById("go-live")?.click();
+				void import("./streaming/broadcast-actions").then(({ toggleBroadcast }) => void toggleBroadcast());
 			},
 		},
 	},

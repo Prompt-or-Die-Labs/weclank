@@ -23,6 +23,7 @@
 import { audioMixer } from "../streaming/audio-mixer";
 import { studio } from "../state/studio-store";
 import { encodeWav } from "./wav-encoder";
+import { logger, metrics } from "../observability";
 import { transcribeWav, DEFAULT_TRANSCRIBE_MODEL } from "./openrouter-stt";
 import { transcribeWavOpenAI, DEFAULT_OPENAI_TRANSCRIBE_MODEL } from "./openai-stt";
 import { transcribeWavElizaCloud, DEFAULT_ELIZACLOUD_TRANSCRIBE_MODEL } from "./elizacloud-stt";
@@ -155,9 +156,11 @@ class MicTranscriber {
 			this.node.port.onmessage = (e: MessageEvent<Float32Array>): void => this.process(e.data);
 			this.source.connect(this.node);
 			this.active = true;
-			console.log("[transcribe] mic capture started via AudioWorklet");
+			logger().withField("component", "mic-transcriber").info("mic capture started via AudioWorklet");
+			metrics().incrementCounter("transcribe_attach_total");
 		} catch (err) {
-			console.warn("[transcribe] attach failed", err);
+			metrics().incrementCounter("transcribe_attach_failures_total");
+			logger().withField("component", "mic-transcriber").withError(err).warn("attach failed");
 			this.tearDownNodes();
 		}
 	}
@@ -237,7 +240,8 @@ class MicTranscriber {
 			this.rateLimitWindowStart = now;
 		}
 		if (this.utterancesThisMinute >= MAX_UTTERANCES_PER_MIN) {
-			console.warn("[transcribe] rate-limited — dropping utterance");
+			metrics().incrementCounter("transcribe_rate_limited_total");
+			logger().withField("component", "mic-transcriber").warn("rate-limited — dropping utterance");
 			return;
 		}
 		this.utterancesThisMinute++;
@@ -246,12 +250,15 @@ class MicTranscriber {
 			const wav = encodeWav(samples, audioMixer.ctx.sampleRate);
 			const result = await transcribeForProvider(this.transcriptionProvider, wav, this.model);
 			this.cumulativeCost += result.cost;
+			metrics().incrementCounter("transcribe_utterances_total", { model: this.model });
+			metrics().recordValue("transcribe_cost_usd", result.cost, { model: this.model });
 			if (!result.text || result.text.length < 2) return;
 			for (const listener of this.subscribers) {
-				try { listener(result.text); } catch (err) { console.warn("[transcribe] listener failed", err); }
+				try { listener(result.text); } catch (err) { logger().withField("component", "mic-transcriber").withError(err).warn("listener failed"); }
 			}
 		} catch (err) {
-			console.warn("[transcribe] failed", err);
+			metrics().incrementCounter("transcribe_failures_total");
+			logger().withField("component", "mic-transcriber").withError(err).warn("transcribe failed");
 		}
 	}
 }

@@ -71,7 +71,9 @@ export function initVoiceRoute(
 	audioMixer.removeInput(participantId);
 	const provider = createTTSProvider(participantId, config);
 	const stream = provider.getStream();
-	audioMixer.addInput(participantId, stream);
+	// TTS providers emit already-mastered audio; bypass the
+	// compressor/limiter chain so we don't double-compress.
+	audioMixer.addInput(participantId, stream, { bypassFilters: true });
 	if (opts.updateParticipant !== false) {
 		studio.updateParticipant(participantId, { tts: config, audioStream: stream });
 	}

@@ -114,7 +114,9 @@ class MusicPlayer {
 	 * to the broadcast mix from the moment the studio starts. */
 	private ensureMixerInput(): void {
 		if (this.registered) return;
-		audioMixer.addInput(MIXER_ID, this.destination.stream);
+		// Music files (Suno-generated) are pre-mastered; bypass the
+		// compressor/limiter chain so we don't double-compress.
+		audioMixer.addInput(MIXER_ID, this.destination.stream, { bypassFilters: true });
 		this.registered = true;
 	}
 }

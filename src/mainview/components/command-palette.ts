@@ -6,6 +6,7 @@ import { openSettingsDialog } from "./settings-dialog";
 import { openHelpDialog } from "./help-dialog";
 import { openSceneImportDialog } from "./scene-import-dialog";
 import { pickRtmpDestination } from "../streaming/rtmp-config-dialog";
+import { toggleBroadcast, saveReplayBufferNow, toggleRecording } from "../streaming/broadcast-actions";
 import { userMessageFor } from "../core/errors";
 
 type Action = { id: string; label: string; keywords: string; run: () => void | Promise<void> };
@@ -16,8 +17,20 @@ const ACTIONS: Action[] = [
 		label: "Go live (opens RTMP picker)",
 		keywords: "stream rtmp broadcast start",
 		run: () => {
-			document.getElementById("go-live")?.click();
+			void toggleBroadcast();
 		},
+	},
+	{
+		id: "record",
+		label: "Toggle local recording",
+		keywords: "recording mp4 webm capture",
+		run: () => void toggleRecording(),
+	},
+	{
+		id: "replay",
+		label: "Save replay buffer (last ~60s)",
+		keywords: "clip moment instant replay save buffer rewind",
+		run: () => void saveReplayBufferNow(),
 	},
 	{
 		id: "rtmp",

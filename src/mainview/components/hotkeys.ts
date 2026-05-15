@@ -4,15 +4,19 @@
 //
 // Bindings:
 //   Cmd/Ctrl + 1..9      → activate scene N (0-indexed)
-//   Cmd/Ctrl + Shift + L → trigger AppHeader's Go Live button
+//   Cmd/Ctrl + Shift + L → toggle live broadcast
 //   Cmd/Ctrl + Shift + R → toggle local recording
+//   Cmd/Ctrl + Shift + B → save replay buffer (last 60s of broadcast)
 //   Cmd/Ctrl + K         → command palette
 //   [ / ]                → cycle right-sidebar tab
 
 import { studio } from "../state/studio-store";
 import { toast } from "./overlays";
-import { localRecorder } from "../streaming/recorder";
-import { userMessageFor } from "../core/errors";
+import {
+	saveReplayBufferNow,
+	toggleBroadcast,
+	toggleRecording,
+} from "../streaming/broadcast-actions";
 
 let installed = false;
 
@@ -71,11 +75,15 @@ function handleKeyDown(e: KeyboardEvent): void {
 	switch (e.key.toLowerCase()) {
 		case "l":
 			e.preventDefault();
-			document.getElementById("go-live")?.click();
+			void toggleBroadcast();
 			break;
 		case "r":
 			e.preventDefault();
 			void toggleRecording();
+			break;
+		case "b":
+			e.preventDefault();
+			void saveReplayBufferNow();
 			break;
 	}
 }
@@ -86,19 +94,4 @@ function cycleSidebarTab(delta: 1 | -1): void {
 	const activeIdx = tabs.findIndex((t) => t.classList.contains("is-active"));
 	const nextIdx = ((activeIdx === -1 ? 0 : activeIdx) + delta + tabs.length) % tabs.length;
 	tabs[nextIdx]?.click();
-}
-
-async function toggleRecording(): Promise<void> {
-	const recording = studio.state.stream.recording || localRecorder.isRecording;
-	if (recording) {
-		localRecorder.stop();
-		return;
-	}
-	try {
-		const started = await localRecorder.start();
-		if (!started) return;
-		toast("Recording started", "success");
-	} catch (err) {
-		toast(`Recording failed: ${userMessageFor(err)}`, "error");
-	}
 }

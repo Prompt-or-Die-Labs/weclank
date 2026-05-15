@@ -11,7 +11,7 @@
 
 import { getStoredApiKey } from "../tts/registry";
 import { ApiError, ConfigError } from "../core/errors";
-import { withBackoff, isRetryableStatus } from "../core/retry";
+import { withBackoff, isRetryableStatus } from "../../shared/retry";
 
 export const DEFAULT_TRANSCRIBE_MODEL = "google/gemini-2.5-flash";
 

@@ -8,7 +8,7 @@
 
 import { MessageQueue, type ChatMessage, type ChatSource } from "./chat-source";
 import { ConfigError, ApiError } from "../core/errors";
-import { reconnectLoop } from "../core/retry";
+import { reconnectLoop } from "../../shared/retry";
 
 const WS_URL = "wss://irc-ws.chat.twitch.tv:443";
 

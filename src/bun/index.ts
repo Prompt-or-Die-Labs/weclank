@@ -49,17 +49,29 @@ function resolveBundledOmnivoiceCarrotPath(): string | null {
 import { randomUUID } from "node:crypto";
 import { open, unlink, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { release as osRelease, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { recordingFileName } from "../shared/recording-names";
+import type { EncoderProfile } from "./egress";
 import {
-	buildFfmpegArgs,
-	buildRtmpUrl,
-	parseFfmpegProgressLine,
-	type EgressStats,
-	type EncoderProfile,
-} from "./egress";
+	currentError as currentEgressError,
+	currentStats as currentEgressStats,
+	pushChunk as pushEgressChunk,
+	startEgressSession,
+	stopEgressSession,
+} from "./egress-session";
+import { startObsWebSocketServer, type ServerHandle as ObsWsServerHandle } from "./obs-ws/server";
+import { EventSubscription } from "./obs-ws/protocol";
+import {
+	createBridgeStudioAdapter,
+	drainObsCommands,
+	updateObsMirror,
+	type ObsCommand,
+	type ObsMirror,
+} from "./obs-ws/studio-bridge";
+import { readObsWsConfig, writeObsWsConfig } from "./obs-ws/config";
+import { readRecentFfmpegLog } from "./ffmpeg-logs";
 import { augmentedProcessEnv } from "./ffmpeg-env";
 import { transcodeWebmFileToMp4, trimMp4Segment } from "./recording-transcode";
 import { uniqueRecordingOutputPath } from "./recording-file-path";
@@ -138,17 +150,16 @@ async function pickOAuthPort(): Promise<number> {
 //   - pushes to the configured RTMP URL
 //
 // `-re` is intentionally omitted (we want the encoder to keep up with
-// real-time, not slow down to it). `-tune zerolatency` + `-preset
-// veryfast` is the standard low-latency live profile.
+// real-time, not slow down to it). The ffmpeg-arg builder applies
+// `-tune zerolatency` (libx264) / `-zerolatency 1` (nvenc) per the
+// FFmpeg flag-tuning audit.
+//
+// The supervisor owns the process lifecycle — see ./egress-supervisor.ts.
 
-interface EgressState {
-	proc: ReturnType<typeof Bun.spawn>;
-	writer: ReturnType<WritableStream<Uint8Array>["getWriter"]> | null;
-	url: string;
-}
-
-let egress: EgressState | null = null;
-let egressStats: EgressStats = {};
+// Egress session state lives in ./egress-session.ts — it owns the
+// supervisor, FFREPORT logs, progress stats, and classified errors.
+// This file just exposes the RPC surface.
+let obsWsServer: ObsWsServerHandle | null = null;
 let recordingWriter: Awaited<ReturnType<typeof open>> | null = null;
 /** Temp file accumulating WebM chunks from the renderer. */
 let recordingStagingPath = "";
@@ -335,39 +346,118 @@ async function consumeTranscriptStream(stream: ReadableStream<Uint8Array>): Prom
 	}
 }
 
+/** macOS 13 = Darwin 22; macOS 14 = Darwin 23. CBR rate-control on
+ *  videotoolbox is gated on Darwin 22+ per the VTB encoder source
+ *  (libavcodec/videotoolboxenc.c). On Intel Macs and older Darwin
+ *  versions we let videotoolbox pick ABR — which is correct there. */
+function isAppleSiliconWithRecentMacOS(): boolean {
+	if (process.platform !== "darwin") return false;
+	if (process.arch !== "arm64") return false;
+	const major = Number(osRelease().split(".")[0]);
+	return Number.isFinite(major) && major >= 22;
+}
+
 async function detectVideoEncoder(): Promise<EncoderProfile> {
 	if (cachedEncoder) return cachedEncoder;
 
+	// Per-encoder AVOptions for live RTMP streaming. Numbers are from
+	// the FFmpeg flag-tuning audit (cited file:line in each comment).
+	// Rate-control args (-b:v/-maxrate/-bufsize) and GOP args are NOT
+	// here — they're set by buildFfmpegArgs uniformly across encoders
+	// so they always reflect the active preset.
+	const cbrIfAppleSilicon = isAppleSiliconWithRecentMacOS();
 	const candidates: EncoderProfile[] = (() => {
 		const profiles: Record<string, EncoderProfile> = {
 			h264_videotoolbox: {
 				name: "h264_videotoolbox",
-				extraArgs: ["-allow_sw", "1", "-realtime", "1"],
-				label: "VideoToolbox (Apple Silicon / Intel)",
+				// libavcodec/videotoolboxenc.c:2775-2794. Without
+				// -constant_bit_rate the encoder emits uncapped VBR
+				// which Twitch/YouTube actively throttle.
+				extraArgs: [
+					"-allow_sw", "1",
+					"-realtime", "1",
+					"-prio_speed", "1",
+					"-profile:v", "high",
+					"-coder", "cabac",
+					"-tag:v", "avc1",
+					...(cbrIfAppleSilicon ? ["-constant_bit_rate", "1"] : []),
+				],
+				label: cbrIfAppleSilicon
+					? "VideoToolbox (Apple Silicon, CBR)"
+					: "VideoToolbox (Intel, ABR)",
 			},
 			h264_nvenc: {
 				name: "h264_nvenc",
-				extraArgs: ["-preset", "p3", "-tune", "ll", "-rc", "cbr"],
+				// libavcodec/nvenc_h264.c:30-200. p4+ll over p3+ll
+				// (p3 is documented "fast (low quality)"). zerolatency=1
+				// + b_ref_mode=disabled disables B-frames + lookahead.
+				// forced-idr + no-scenecut give regular IDRs on the GOP
+				// boundary so HLS segmentation downstream is clean.
+				extraArgs: [
+					"-preset", "p4",
+					"-tune", "ll",
+					"-rc", "cbr",
+					"-multipass", "disabled",
+					"-zerolatency", "1",
+					"-b_ref_mode", "disabled",
+					"-forced-idr", "1",
+					"-no-scenecut", "1",
+				],
 				label: "NVENC (NVIDIA)",
 			},
 			h264_qsv: {
 				name: "h264_qsv",
-				extraArgs: ["-preset", "veryfast"],
+				// libavcodec/qsvenc.c. async_depth=1 + look_ahead=0 is
+				// what OBS uses for live; low_power=0 ensures the
+				// full-quality path on integrated graphics.
+				extraArgs: [
+					"-preset", "veryfast",
+					"-rc", "cbr",
+					"-look_ahead", "0",
+					"-async_depth", "1",
+					"-low_power", "0",
+				],
 				label: "QuickSync (Intel)",
 			},
 			h264_vaapi: {
 				name: "h264_vaapi",
-				extraArgs: ["-vaapi_device", "/dev/dri/renderD128", "-vf", "format=nv12,hwupload"],
+				// doc/encoders.texi:4540. rc_mode default is
+				// driver-dependent (AMD vs Intel) so explicit for
+				// cross-vendor consistency.
+				extraArgs: [
+					"-vaapi_device", "/dev/dri/renderD128",
+					"-vf", "format=nv12,hwupload",
+					"-rc_mode", "CBR",
+					"-profile:v", "high",
+					"-compression_level", "1",
+				],
 				label: "VAAPI (Linux generic)",
 			},
 			h264_amf: {
 				name: "h264_amf",
-				extraArgs: ["-usage", "lowlatency"],
+				// libavcodec/amfenc_h264.c:35-92. quality defaults to
+				// the QUALITY preset which contradicts the lowlatency
+				// usage intent — explicit `-quality speed` is required.
+				extraArgs: [
+					"-usage", "lowlatency",
+					"-quality", "speed",
+					"-rc", "cbr",
+					"-profile", "high",
+				],
 				label: "AMF (AMD)",
 			},
 			libx264: {
 				name: "libx264",
-				extraArgs: ["-preset", "veryfast", "-tune", "zerolatency"],
+				// doc/encoders.texi:2619-3027. nal-hrd=cbr makes the
+				// CBR HRD-compliant (what every RTMP sink expects);
+				// bframes=0 + scenecut=0 is the documented low-latency
+				// configuration.
+				extraArgs: [
+					"-preset", "veryfast",
+					"-tune", "zerolatency",
+					"-profile:v", "high",
+					"-x264-params", "nal-hrd=cbr:scenecut=0:bframes=0",
+				],
 				label: "libx264 (software fallback)",
 			},
 		};
@@ -398,16 +488,127 @@ async function detectVideoEncoder(): Promise<EncoderProfile> {
 	}
 
 	for (const candidate of candidates) {
-		if (available.includes(` ${candidate.name} `) || available.includes(`\n${candidate.name} `)) {
+		if (!available.includes(` ${candidate.name} `) && !available.includes(`\n${candidate.name} `)) {
+			continue;
+		}
+		// libx264 is always-works (software); skip the active probe.
+		if (candidate.name === "libx264") {
 			cachedEncoder = candidate;
 			console.log("[ffmpeg] using video encoder:", candidate.label);
 			return candidate;
 		}
+		// Active session probe — catches "encoder enumerates but driver
+		// is broken" (missing CUDA runtime, libamfrt ABI mismatch, VAAPI
+		// device permission). 0.1s of testsrc through the encoder to
+		// /dev/null; if exit code != 0, fall through to next candidate.
+		const probeStart = Date.now();
+		const ok = await probeEncoderOpenable(candidate);
+		const probeMs = Date.now() - probeStart;
+		if (!ok) {
+			console.warn(`[ffmpeg] ${candidate.label} enumerates but failed open-session probe (${probeMs}ms); trying next`);
+			continue;
+		}
+		console.log(`[ffmpeg] using video encoder: ${candidate.label} (probed ok in ${probeMs}ms)`);
+		cachedEncoder = candidate;
+		return candidate;
 	}
 	// All probes failed — last entry is always libx264.
 	const last = candidates[candidates.length - 1]!;
 	cachedEncoder = last;
 	return last;
+}
+
+/** Spawn ffmpeg with the candidate's extraArgs against a tiny synthetic
+ *  input + a null sink. If the encoder driver is broken (missing
+ *  runtime, ABI mismatch, no permission for /dev/dri/renderD128), the
+ *  process exits non-zero within ~500ms. Resolves to true only on
+ *  exit code 0 + stderr free of fatal markers. */
+async function probeEncoderOpenable(candidate: EncoderProfile): Promise<boolean> {
+	try {
+		const args = [
+			"ffmpeg",
+			"-hide_banner",
+			"-loglevel", "error",
+			"-f", "lavfi",
+			"-i", "color=size=64x64:rate=1",
+			"-t", "0.1",
+			"-c:v", candidate.name,
+			...candidate.extraArgs,
+			"-f", "null", "-",
+		];
+		const proc = Bun.spawn(args, {
+			stdout: "ignore",
+			stderr: "pipe",
+			env: augmentedProcessEnv(),
+		});
+		// Cap probe at 5s — broken VAAPI drivers can hang ffmpeg
+		// indefinitely on device-open.
+		const code = await Promise.race([
+			proc.exited,
+			new Promise<number>((resolve) => setTimeout(() => {
+				try { proc.kill("SIGKILL"); } catch { /* noop */ }
+				resolve(124); // "timeout" sentinel
+			}, 5_000)),
+		]);
+		return code === 0;
+	} catch {
+		return false;
+	}
+}
+
+// --- obs-websocket server lifecycle ----------------------------------
+//
+// Config persistence + validation live in ./obs-ws/config.ts. This block
+// owns only the runtime: the server handle, the last startup error, and
+// the apply-state machine that reconciles the persisted config with the
+// current handle.
+
+/** Captures the reason a previous applyObsWsServerState() call failed
+ *  to start the server. Cleared on a successful start or when the user
+ *  toggles enabled=false. Surfaced through getObsWsConfig so the UI
+ *  doesn't show "enabled" silently — a stale config + an in-use port
+ *  used to boot with only a console warn. */
+let obsWsLastStartupError: string | null = null;
+
+async function applyObsWsServerState(): Promise<void> {
+	const cfg = await readObsWsConfig();
+	const shouldRun = cfg.enabled;
+
+	const startFresh = (): void => {
+		obsWsServer = startObsWebSocketServer({
+			hostname: cfg.hostname,
+			port: cfg.port,
+			password: cfg.password,
+			studio: createBridgeStudioAdapter(),
+		});
+		obsWsLastStartupError = null;
+		console.log(`[obs-ws] listening on ws://${cfg.hostname}:${obsWsServer.port}`);
+	};
+
+	if (shouldRun && !obsWsServer) {
+		try {
+			startFresh();
+		} catch (err) {
+			obsWsLastStartupError = err instanceof Error ? err.message : String(err);
+			obsWsServer = null;
+			console.warn("[obs-ws] start failed:", obsWsLastStartupError);
+		}
+	} else if (!shouldRun && obsWsServer) {
+		await obsWsServer.stop();
+		obsWsServer = null;
+		obsWsLastStartupError = null;
+		console.log("[obs-ws] stopped");
+	} else if (shouldRun && obsWsServer && obsWsServer.port !== cfg.port) {
+		// Port changed — restart on new port.
+		await obsWsServer.stop();
+		obsWsServer = null;
+		try {
+			startFresh();
+		} catch (err) {
+			obsWsLastStartupError = err instanceof Error ? err.message : String(err);
+			console.warn("[obs-ws] restart failed:", obsWsLastStartupError);
+		}
+	}
 }
 
 // RPC schema shared between Bun and the webview. The view-side imports this
@@ -517,8 +718,20 @@ export type PhotoBoothRPC = {
 			startStreamEgress: {
 				/** Each destination becomes one branch of ffmpeg's `tee`
 				 * muxer, letting the same encoded stream fan out to
-				 * Twitch + YouTube + a local mirror simultaneously. */
-				params: { destinations: Array<{ rtmpUrl: string; streamKey: string }> };
+				 * Twitch + YouTube + a local mirror simultaneously.
+				 *
+				 * `fps` and `videoBitsPerSecond` come from the active
+				 * preset on the renderer side. Both are REQUIRED —
+				 * absent them ffmpeg picks its own (wrong) defaults
+				 * (videotoolbox emits uncapped VBR, nvenc defaults to
+				 * ~2 Mbps regardless of resolution, libx264 falls back
+				 * to CRF 23 which varies wildly). */
+				params: {
+					destinations: Array<{ rtmpUrl: string; streamKey: string }>;
+					fps: number;
+					videoBitsPerSecond: number;
+					audioBitsPerSecond?: number;
+				};
 				response: { success: boolean; error?: string; destinationCount?: number };
 			};
 			pushStreamChunk: {
@@ -653,7 +866,10 @@ export type PhotoBoothRPC = {
 				params: Record<string, never>;
 				response: { code: string; done: boolean; error?: string };
 			};
-			/** Latest ffmpeg progress stats — empty object when not live. */
+			/** Latest ffmpeg progress stats + supervisor lifecycle state.
+			 *  `lifecycle` is the public projection of the EgressLifecycleState
+			 *  union — the stats strip uses it to color the LIVE pill
+			 *  (green=live, yellow=reconnecting, red=failed). */
 			getStreamStats: {
 				params: Record<string, never>;
 				response: {
@@ -663,7 +879,86 @@ export type PhotoBoothRPC = {
 					timeSeconds?: number;
 					speed?: number;
 					updatedAt?: number;
+					lifecycle?: "idle" | "live" | "reconnecting" | "failed";
+					reconnectAttempt?: number;
+					restarts?: number;
 				};
+			};
+			/** Latest classified ffmpeg-stderr error during the current
+			 *  egress session. Reset when a new session starts. The
+			 *  renderer polls this to surface actionable toasts
+			 *  ("VAAPI driver not installed; switch to libx264")
+			 *  instead of generic "ffmpeg died". */
+			getStreamError: {
+				params: Record<string, never>;
+				response: {
+					message?: string;
+					severity?: "fatal" | "transient" | "info";
+					at?: number;
+				};
+			};
+			/** Tail of the most recent ffmpeg FFREPORT log file under
+			 *  userDataDir()/logs/. Used by the "View ffmpeg log"
+			 *  affordance in the stats strip. */
+			getRecentFfmpegLog: {
+				params: { tail?: number };
+				response: { path?: string; lines: string[] };
+			};
+
+			// --- obs-websocket bridge ---
+			/** Renderer pushes its current state slice to Bun's mirror.
+			 *  obs-ws handlers read this synchronously. Called by the
+			 *  renderer's studio-store subscription on every relevant
+			 *  state change. */
+			updateObsMirror: {
+				params: Partial<{
+					scenes: Array<{ sceneName: string; sceneIndex: number }>;
+					currentSceneName: string | null;
+					streamLive: boolean;
+					recording: boolean;
+					streamTimecode: string;
+					recordTimecode: string;
+				}>;
+				response: { ok: boolean };
+			};
+			/** Renderer polls for commands enqueued by obs-ws clients.
+			 *  Returns an empty array when nothing's queued. Includes
+			 *  `nextPollMs` so the renderer can back off when nobody's
+			 *  listening — fast (250ms) when clients connected, slow
+			 *  (5s) when idle. */
+			pollObsCommands: {
+				params: Record<string, never>;
+				response: {
+					commands: Array<{ type: string; sceneName?: string }>;
+					nextPollMs: number;
+				};
+			};
+			/** Read or set the obs-ws server config. Server starts on
+			 *  the first set() with `enabled: true`; subsequent toggles
+			 *  start/stop. Bind defaults to 127.0.0.1; opt-in LAN
+			 *  exposure forces password to be set. */
+			getObsWsConfig: {
+				params: Record<string, never>;
+				response: {
+					enabled: boolean;
+					port: number;
+					hostname: string;
+					hasPassword: boolean;
+					listening: boolean;
+					/** Reason the last applyObsWsServerState() call failed
+					 *  to start the server, or null if everything's fine.
+					 *  If enabled=true and listening=false, this is why. */
+					lastStartupError: string | null;
+				};
+			};
+			setObsWsConfig: {
+				params: {
+					enabled: boolean;
+					port?: number;
+					hostname?: string;
+					password?: string;
+				};
+				response: { ok: boolean; listening: boolean; error?: string };
 			};
 			getStudioWindowMode: {
 				params: Record<string, never>;
@@ -1182,92 +1477,12 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 				return { ok: false, error: r.error };
 			},
 
-			startStreamEgress: async ({ destinations }) => {
-				if (egress) {
-					return { success: false, error: "Egress already running" };
-				}
-				if (!destinations || destinations.length === 0) {
-					return { success: false, error: "No destinations provided" };
-				}
-				const targets = destinations.map((d) => buildRtmpUrl(d.rtmpUrl, d.streamKey));
-				for (const t of targets) {
-					if (!t.startsWith("rtmp://") && !t.startsWith("rtmps://")) {
-						return { success: false, error: `Destination must use rtmp:// or rtmps://: ${t}` };
-					}
-				}
-				try {
-					const encoder = await detectVideoEncoder();
-					const proc = Bun.spawn(buildFfmpegArgs(encoder, targets), {
-						stdin: "pipe",
-						stdout: "ignore",
-						stderr: "pipe",
-						env: augmentedProcessEnv(),
-					});
-					// The cast keeps TS happy across Bun versions where
-					// stdin's inferred type drifts between WritableStream
-					// and FileSink.
-					const stdin = proc.stdin as unknown as WritableStream<Uint8Array>;
-					const writer = stdin.getWriter();
-					egress = { proc, writer, url: targets.join(" + ") };
-
-					// Reset stats for the new session.
-					egressStats = {};
-
-					// Surface ffmpeg's stderr to the host console AND parse
-					// the periodic progress reports (fps / bitrate / drops)
-					// so the renderer can poll them via getStreamStats.
-					void (async (): Promise<void> => {
-						const reader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
-						const decoder = new TextDecoder();
-						let buffer = "";
-						while (true) {
-							const { done, value } = await reader.read();
-							if (done) break;
-							buffer += decoder.decode(value, { stream: true });
-							// ffmpeg uses \r to overwrite the progress line —
-							// split on either CR or LF so we get one stat
-							// update per refresh.
-							const parts = buffer.split(/[\r\n]/);
-							buffer = parts.pop() ?? "";
-							for (const line of parts) {
-								if (!line.trim()) continue;
-								console.log("[ffmpeg]", line.trim());
-								if (line.includes("frame=") || line.includes("bitrate=")) {
-									egressStats = parseFfmpegProgressLine(egressStats, line);
-								}
-							}
-						}
-					})();
-
-					// Watch for unexpected ffmpeg exit. If we're still
-					// considered live and the process dies (RTMP kicked,
-					// segfault, etc.) we mark egress dead so the next
-					// pushStreamChunk fails cleanly and the renderer can
-					// surface the disconnect.
-					void (async (): Promise<void> => {
-						const code = await proc.exited;
-						if (egress?.proc === proc) {
-							console.warn(`[ffmpeg] exited unexpectedly with code ${code}`);
-							egress = null;
-						}
-					})();
-
-					return { success: true, destinationCount: targets.length };
-				} catch (error) {
-					egress = null;
-					return { success: false, error: (error as Error).message };
-				}
+			startStreamEgress: async ({ destinations, fps, videoBitsPerSecond, audioBitsPerSecond }) => {
+				const encoder = await detectVideoEncoder();
+				return startEgressSession({ destinations, fps, videoBitsPerSecond, audioBitsPerSecond, encoder });
 			},
 
-			pushStreamChunk: async ({ base64 }) => {
-				if (!egress?.writer) return { ok: false, error: "Egress not running" };
-				try {
-					await egress.writer.write(base64ToBytes(base64));
-					return { ok: true };
-				} catch (error) {
-					return { ok: false, error: (error as Error).message };
-				}
-			},
+			pushStreamChunk: async ({ base64 }) => pushEgressChunk(base64ToBytes(base64)),
 
 			startTranscriptWatch: async ({ path }) => {
 				if (!path) return { success: false, error: "path required" };
@@ -1391,7 +1606,75 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 			userDeleteSecret: async ({ userId, key }) => deleteSecret(userId, key),
 
 			getDatabasePath: async () => ({ path: getDbPath() }),
-			getStreamStats: async () => ({ ...egressStats }),
+			getStreamStats: async () => currentEgressStats(),
+			getStreamError: async () => currentEgressError(),
+			getRecentFfmpegLog: async ({ tail }) => readRecentFfmpegLog(tail ?? 100),
+
+			updateObsMirror: async (patch) => {
+				updateObsMirror(patch as Partial<ObsMirror>);
+				// If the live state changed and we're connected to obs-ws
+				// clients, emit the appropriate event so Stream Deck shows
+				// the new state without polling.
+				if (obsWsServer) {
+					if (typeof patch.currentSceneName === "string") {
+						obsWsServer.emit(EventSubscription.Scenes, "CurrentProgramSceneChanged", {
+							sceneName: patch.currentSceneName,
+						});
+					}
+					if (typeof patch.streamLive === "boolean") {
+						obsWsServer.emit(EventSubscription.Outputs, "StreamStateChanged", {
+							outputActive: patch.streamLive,
+							outputState: patch.streamLive ? "OBS_WEBSOCKET_OUTPUT_STARTED" : "OBS_WEBSOCKET_OUTPUT_STOPPED",
+						});
+					}
+					if (typeof patch.recording === "boolean") {
+						obsWsServer.emit(EventSubscription.Outputs, "RecordStateChanged", {
+							outputActive: patch.recording,
+							outputState: patch.recording ? "OBS_WEBSOCKET_OUTPUT_STARTED" : "OBS_WEBSOCKET_OUTPUT_STOPPED",
+						});
+					}
+				}
+				return { ok: true };
+			},
+
+			pollObsCommands: async () => {
+				const commands = drainObsCommands() as Array<ObsCommand & { type: string }>;
+				// Server idle → renderer polls every 5s. Active clients
+				// → 250ms (the existing fast-path cadence). If the
+				// server isn't running at all, even slower would be
+				// fine but 5s matches the "is it back?" recovery time
+				// after a settings toggle.
+				const activeClients = obsWsServer?.identifiedClientCount() ?? 0;
+				const nextPollMs = activeClients > 0 ? 250 : 5_000;
+				return { commands, nextPollMs };
+			},
+
+			getObsWsConfig: async () => {
+				const cfg = await readObsWsConfig();
+				return {
+					enabled: cfg.enabled,
+					port: cfg.port,
+					hostname: cfg.hostname,
+					hasPassword: Boolean(cfg.password),
+					listening: obsWsServer !== null,
+					lastStartupError: obsWsLastStartupError,
+				};
+			},
+
+			setObsWsConfig: async ({ enabled, port, hostname, password }) => {
+				try {
+					await writeObsWsConfig({ enabled, port, hostname, password });
+				} catch (err) {
+					// Validation rejected (e.g. LAN without password).
+					return { ok: false, listening: false, error: (err as Error).message };
+				}
+				await applyObsWsServerState();
+				return {
+					ok: obsWsLastStartupError === null,
+					listening: obsWsServer !== null,
+					error: obsWsLastStartupError ?? undefined,
+				};
+			},
 			getStudioWindowMode: async () => ({
 				alwaysOnTop: mainWindow.isAlwaysOnTop(),
 				visibleOnAllWorkspaces: mainWindow.isVisibleOnAllWorkspaces(),
@@ -2000,32 +2283,7 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 				}
 			},
 
-			stopStreamEgress: async () => {
-				if (!egress) {
-					// Already stopped (maybe ffmpeg crashed) — make sure
-					// the HUD doesn't keep showing stale stats from a
-					// previous session.
-					egressStats = {};
-					return { success: true };
-				}
-				const state = egress;
-				egress = null;
-				try {
-					await state.writer?.close();
-				} catch {
-					// ffmpeg may have already exited; ignore.
-				}
-				try {
-					// Give ffmpeg a moment to flush the RTMP buffer.
-					await Promise.race([
-						state.proc.exited,
-						new Promise((r) => setTimeout(r, 3_000)),
-					]);
-				} catch { /* noop */ }
-				try { state.proc.kill(); } catch { /* noop */ }
-				egressStats = {};
-				return { success: true };
-			},
+			stopStreamEgress: async () => stopEgressSession(),
 		},
 		messages: {},
 	},
@@ -2048,6 +2306,14 @@ void openDb().then(async (d) => {
 		if (running.length) console.log("[carrots] running:", running.join(", "));
 	} catch (err) {
 		console.warn("[carrots] startEnabled failed:", err);
+	}
+	// Auto-start obs-websocket server if the persisted config asks for it.
+	// Failures are non-fatal — the studio still boots; the user gets a
+	// clear error via the settings dialog if they try to re-enable.
+	try {
+		await applyObsWsServerState();
+	} catch (err) {
+		console.warn("[obs-ws] auto-start failed:", err);
 	}
 }).catch((err) => {
 	console.error("[db] failed to open:", err);
