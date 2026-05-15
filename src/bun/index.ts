@@ -2436,7 +2436,14 @@ function installNativeShell(): void {
 		const action = nativeMenuActionFromEvent(event as { data?: { action?: string } });
 		if (action) handleNativeMenuAction(action);
 	});
-	tray = new Tray({ title: "Weclank" });
+	tray = new Tray({
+		title: "Weclank",
+		// `template: true` lets macOS auto-invert the icon for dark/light
+		// menubars; on Linux/Windows it's drawn as-is. The PNG is copied
+		// into the bundle at views/icons/trayicon.png via electrobun.config.
+		image: "views://icons/trayicon.png",
+		template: true,
+	});
 	tray.setMenu(buildTrayMenu());
 	tray.on("tray-clicked", (event) => {
 		const action = nativeMenuActionFromEvent(event as { data?: { action?: string } });
