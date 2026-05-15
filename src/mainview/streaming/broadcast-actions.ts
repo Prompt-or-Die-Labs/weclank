@@ -95,7 +95,12 @@ export function createBroadcastActions(deps: BroadcastActionsDeps = defaultDeps)
 		try {
 			await egressController.start(destinations);
 			studio.setStream({ live: true });
-			toast(`Live on ${count} destination${count > 1 ? "s" : ""}`, "success");
+			// Don't claim "Live on N" yet — `egressController.start` only
+			// guarantees ffmpeg spawned and survived its quick-death
+			// window, not that RTMP handshake succeeded. The stats-strip
+			// pill (driven by the supervisor lifecycle) and its toast
+			// pipeline are what surface the real "live" / "failed"
+			// transitions once ffmpeg's first progress block lands.
 			return true;
 		} catch (err) {
 			const detail = err instanceof StudioError ? err.message : userMessageFor(err);

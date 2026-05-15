@@ -10,7 +10,7 @@ import { createEgressSupervisor, type EgressLifecycleState } from "./egress-supe
 // ffmpeg itself.
 
 describe("egress-supervisor", () => {
-	test("start() spawns and reports live", async () => {
+	test("start() spawns and lands in `starting` until noteActivity promotes to live", async () => {
 		const states: EgressLifecycleState[] = [];
 		const sup = createEgressSupervisor({
 			args: ["cat"],
@@ -18,13 +18,18 @@ describe("egress-supervisor", () => {
 		});
 
 		await sup.start();
+		// After settle we're in `starting`, NOT `live` — bytes haven't
+		// flowed yet so the LIVE pill / "Live on N" toast must wait.
+		expect(sup.getState().kind).toBe("starting");
+
+		// Simulate ffmpeg's first progress block landing.
+		sup.noteActivity();
 		expect(sup.getState().kind).toBe("live");
 
 		await sup.stop();
 		expect(sup.getState().kind).toBe("idle");
 
-		// Transitions observed: live → idle (no reconnect, clean stop)
-		expect(states.map((s) => s.kind)).toEqual(["live", "idle"]);
+		expect(states.map((s) => s.kind)).toEqual(["starting", "live", "idle"]);
 	});
 
 	test("write() returns true while live, false after stop", async () => {
@@ -49,7 +54,7 @@ describe("egress-supervisor", () => {
 		});
 
 		await sup.start();
-		expect(sup.getState().kind).toBe("live");
+		expect(sup.getState().kind).toBe("starting");
 		// Wait past the sleep so the proc exits cleanly.
 		await new Promise((r) => setTimeout(r, 500));
 		// Should now be idle (clean exit, no reconnect).
@@ -130,31 +135,66 @@ describe("egress-supervisor", () => {
 	});
 
 	test("StaleTimeout watchdog kills silent ffmpeg + triggers respawn", async () => {
-		// Process that lives indefinitely without ever calling
-		// noteActivity() — simulates ffmpeg that's stuck in a buffer
-		// (RTMP receiver dead, TCP buffer absorbing writes). Watchdog
-		// must kill it. We use `sleep 60` as a stand-in for "lives
-		// forever, never produces progress."
+		// Process that lives indefinitely. We send one heartbeat to
+		// promote to `live`, then stop — simulating ffmpeg that
+		// successfully connected and then went silent (RTMP receiver
+		// dead, TCP buffer absorbing writes). Watchdog must kill it.
 		const kindsObserved: string[] = [];
 		const sup = createEgressSupervisor({
 			args: ["sleep", "60"],
 			staleTimeoutMs: 1_500, // short for test speed
+			connectTimeoutMs: 0,    // disable connect-timeout — this test is about stale-after-live
 			initialReconnectDelayMs: 100,
 			maxReconnectAttempts: 1,
 			onState: (s) => kindsObserved.push(s.kind),
 		});
 
 		await sup.start();
+		// Promote to live so the stale-timeout path applies.
+		sup.noteActivity();
 		expect(sup.getState().kind).toBe("live");
 
-		// Don't call noteActivity(). Watchdog should fire within ~2.5s
+		// Don't call noteActivity again. Watchdog should fire within ~2.5s
 		// (1.5s threshold + 1s watchdog check granularity).
 		await new Promise((r) => setTimeout(r, 3_000));
 
 		// After the watchdog killed sleep, the supervisor's respawn
 		// loop attempts `sleep 60` again (which lives), so we may
-		// be in "live" again at this point. The key invariant: we
+		// be in `starting` again at this point. The key invariant: we
 		// MUST have transitioned through reconnecting at least once.
+		expect(kindsObserved).toContain("reconnecting");
+
+		await sup.stop();
+	}, 10_000);
+
+	test("connect-timeout kills ffmpeg that never produces progress (X-without-Producer-access bug)", async () => {
+		// `sleep 60` stands in for ffmpeg that spawned, opened a TCP
+		// socket, and is now waiting for the RTMP handshake forever.
+		// Pre-fix, the supervisor sat in `live` forever and the renderer
+		// showed LIVE with 0 kbps. With the connect-timeout, the
+		// watchdog kills the proc and the exit-watcher transitions
+		// through `reconnecting`, surfacing the issue to the user.
+		const kindsObserved: string[] = [];
+		const sup = createEgressSupervisor({
+			args: ["sleep", "60"],
+			connectTimeoutMs: 500,
+			staleTimeoutMs: 0,
+			initialReconnectDelayMs: 50,
+			maxReconnectAttempts: 1,
+			onState: (s) => kindsObserved.push(s.kind),
+		});
+
+		await sup.start();
+		expect(sup.getState().kind).toBe("starting");
+
+		// Watchdog tick is 1s; first kill ≈ 1s in.
+		await new Promise((r) => setTimeout(r, 2_500));
+
+		// The point: the supervisor noticed nothing was happening and
+		// surfaced it via reconnecting (instead of showing LIVE forever).
+		// "Failed" terminal state needs a consecutive-kill counter to
+		// converge — that's a separate concern from the user-facing
+		// "stop showing LIVE on a dead stream" fix shipping here.
 		expect(kindsObserved).toContain("reconnecting");
 
 		await sup.stop();
@@ -165,13 +205,16 @@ describe("egress-supervisor", () => {
 		const sup = createEgressSupervisor({
 			args: ["sleep", "60"],
 			staleTimeoutMs: 1_000,
+			connectTimeoutMs: 0,
 			initialReconnectDelayMs: 100,
 			maxReconnectAttempts: 1,
 			onState: (s) => kindsObserved.push(s.kind),
 		});
 
 		await sup.start();
-		// Heartbeat every 300ms — well under the 1s stale threshold.
+		// First heartbeat promotes starting → live, then we keep beating
+		// every 300ms — well under the 1s stale threshold.
+		sup.noteActivity();
 		const interval = setInterval(() => sup.noteActivity(), 300);
 		try {
 			await new Promise((r) => setTimeout(r, 2_500));
@@ -187,18 +230,21 @@ describe("egress-supervisor", () => {
 		await sup.stop();
 	}, 10_000);
 
-	test("StaleTimeout disabled (=0) lets a silent process run forever", async () => {
+	test("both watchdogs disabled (=0) let a silent process run forever", async () => {
 		const kindsObserved: string[] = [];
 		const sup = createEgressSupervisor({
 			args: ["sleep", "60"],
-			staleTimeoutMs: 0, // disabled
+			staleTimeoutMs: 0,    // disabled
+			connectTimeoutMs: 0,  // disabled
 			onState: (s) => kindsObserved.push(s.kind),
 		});
 
 		await sup.start();
-		// 1.5s with NO heartbeats — should still be live (watchdog disabled).
+		// 1.5s with NO heartbeats and NO connect-timeout — should stay
+		// in `starting` (never killed). The point of the test is that
+		// disabling both watchdogs really does disable them.
 		await new Promise((r) => setTimeout(r, 1_500));
-		expect(sup.getState().kind).toBe("live");
+		expect(sup.getState().kind).toBe("starting");
 		expect(kindsObserved).not.toContain("reconnecting");
 
 		await sup.stop();
@@ -215,7 +261,14 @@ describe("egress-supervisor", () => {
 			initialReconnectDelayMs: 30,
 			maxReconnectDelayMs: 50,
 			maxReconnectAttempts: 5,
+			connectTimeoutMs: 0,
 			onState: (s) => {
+				if (s.kind === "starting") {
+					// First progress block would arrive here in production.
+					// Drive the promotion synchronously so the `live`
+					// state machine logic gets exercised in test.
+					sup.noteActivity();
+				}
 				if (s.kind === "live") liveStates.push({ restarts: s.restarts });
 			},
 		});

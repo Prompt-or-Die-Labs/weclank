@@ -7,8 +7,12 @@ describe("reduceStatsPoll — state derivation", () => {
 		expect(r.patch.bitrateKbps).toBe(2048);
 		expect(r.patch.droppedFrames).toBe(3);
 		expect(r.patch.timeSeconds).toBe(42);
-		// No lifecycle in stats → defaults to "live" (legacy compat).
-		expect(r.patch.lifecycle).toBe("live");
+		// No lifecycle in stats → defaults to "starting". Older default
+		// of "live" lied during the connecting window — the supervisor
+		// now distinguishes a settled spawn (`starting`) from a spawn
+		// that's actually producing bytes (`live`), and the pill
+		// follows.
+		expect(r.patch.lifecycle).toBe("starting");
 	});
 
 	test("missing numeric fields default to 0", () => {
@@ -19,10 +23,21 @@ describe("reduceStatsPoll — state derivation", () => {
 	});
 
 	test("propagates lifecycle from Bun's supervisor", () => {
-		for (const lifecycle of ["idle", "live", "reconnecting", "failed"] satisfies Lifecycle[]) {
+		for (const lifecycle of ["idle", "starting", "live", "reconnecting", "failed"] satisfies Lifecycle[]) {
 			const r = reduceStatsPoll({ lifecycle }, {}, 0);
 			expect(r.patch.lifecycle).toBe(lifecycle);
 		}
+	});
+
+	test("promotes starting → live with a success toast", () => {
+		const r = reduceStatsPoll({ lifecycle: "live" }, {}, 0, "starting");
+		expect(r.patch.lifecycle).toBe("live");
+		expect(r.toast?.tone).toBe("success");
+	});
+
+	test("idle → live (no prior starting state) does NOT toast", () => {
+		const r = reduceStatsPoll({ lifecycle: "live" }, {}, 0, "idle");
+		expect(r.toast).toBeUndefined();
 	});
 
 	test("includes reconnect attempt count when reconnecting", () => {

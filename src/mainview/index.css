@@ -828,7 +828,8 @@ input, textarea, select { font: inherit; }
 .channel-link__hint {
 	margin: 0 0 var(--space-3);
 	padding: var(--space-2) var(--space-3);
-	height: 58px;
+	height: auto;
+	min-height: 58px;
 	overflow: auto;
 	font-size: 11px;
 	line-height: 1.45;
@@ -837,6 +838,11 @@ input, textarea, select { font: inherit; }
 	border: 1px solid var(--border);
 	border-left: 2px solid var(--accent);
 	border-radius: var(--radius-sm);
+}
+.channel-link__hint--warning {
+	color: #ffeaa7;
+	background: rgba(231, 76, 60, 0.08);
+	border-left-color: #ff9f43;
 }
 .brand-mark {
 	font-family: var(--font-mono);

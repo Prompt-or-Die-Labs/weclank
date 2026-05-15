@@ -879,7 +879,7 @@ export type PhotoBoothRPC = {
 					timeSeconds?: number;
 					speed?: number;
 					updatedAt?: number;
-					lifecycle?: "idle" | "live" | "reconnecting" | "failed";
+					lifecycle?: "idle" | "starting" | "live" | "reconnecting" | "failed";
 					reconnectAttempt?: number;
 					restarts?: number;
 				};
