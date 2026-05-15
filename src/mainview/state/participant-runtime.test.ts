@@ -10,14 +10,28 @@ type EventName = "banter-stop" | "voice-dispose" | "mixer-remove" | "track-stop"
 let events: EventName[] = [];
 
 mock.module("../streaming/audio-mixer", () => {
+	// Bun's `mock.module` is process-wide and fires at the mocked module's
+	// FIRST import, not at run-time. On Linux ext4 (CI), this file loads
+	// before vad.test.ts; on macOS HFS+ it loads after. Either way the
+	// stub leaks into other tests' `audioMixer` imports — so it has to
+	// actually behave like the real mixer w.r.t. the analyser map, or
+	// any downstream `addInput` / `getAnalyser` caller sees nulls and
+	// fails. The events array still records `mixer-remove` for this
+	// file's own dispose-order assertions.
 	const ctx = new AudioContext();
+	const channels = new Map<string, AnalyserNode>();
 	return {
 		audioMixer: {
 			ctx,
-			removeInput: () => { events.push("mixer-remove"); },
-			addInput: () => null,
-			getAnalyser: () => undefined,
-			hasChannel: () => false,
+			removeInput: (id: string) => { events.push("mixer-remove"); channels.delete(id); },
+			addInput: (id: string) => {
+				const a = ctx.createAnalyser();
+				channels.set(id, a);
+				return a;
+			},
+			getAnalyser: (id: string) => channels.get(id),
+			hasChannel: (id: string) => channels.has(id),
+			channelIds: () => Array.from(channels.keys()),
 			resume: async () => {},
 		},
 	};
