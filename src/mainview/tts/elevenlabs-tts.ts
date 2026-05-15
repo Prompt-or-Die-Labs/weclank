@@ -15,9 +15,11 @@
 import { StreamingTTSProvider, base64ToPCM16 } from "./streaming-provider";
 import { ApiError, ConfigError } from "../core/errors";
 
+import { DEFAULT_ELEVENLABS_MODEL_ID, DEFAULT_ELEVENLABS_VOICE_ID } from "./elevenlabs-voices";
+
 const SAMPLE_RATE = 22_050;
-const DEFAULT_VOICE = "21m00Tcm4TlvDq8ikWAM"; // Rachel
-const DEFAULT_MODEL = "eleven_turbo_v2_5";
+const DEFAULT_VOICE = DEFAULT_ELEVENLABS_VOICE_ID;
+const DEFAULT_MODEL = DEFAULT_ELEVENLABS_MODEL_ID;
 
 export class ElevenLabsTTSProvider extends StreamingTTSProvider {
 	readonly id = "elevenlabs";

@@ -5,6 +5,7 @@ artifacts/
 *.tsbuildinfo
 .DS_Store
 .agents/
+.claude/
 .cursor/hooks/state/
 .lanes/
 skills-lock.json

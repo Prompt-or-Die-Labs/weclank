@@ -19,6 +19,10 @@ export class ScreenRenderer implements AgentRenderer {
 		ctx.host.appendChild(this.video);
 
 		this.stream = participant.mediaStream ?? await this.captureScreen();
+		if (!participant.mediaStream) {
+			const { studio } = await import("../state/studio-store");
+			studio.updateParticipant(participant.id, { mediaStream: this.stream });
+		}
 		this.video.srcObject = this.stream;
 		await new Promise<void>((resolve) => {
 			if (!this.video) {

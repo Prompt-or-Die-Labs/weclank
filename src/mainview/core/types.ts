@@ -34,7 +34,7 @@ export interface VisualConfig {
 	animations?: { idle?: string; talking?: string };
 }
 
-export type TTSProviderId = "elevenlabs" | "openrouter" | "suno" | "openai";
+export type TTSProviderId = "elevenlabs" | "openrouter" | "openai" | "elizacloud" | "omnivoice";
 
 export interface TTSConfig {
 	provider: TTSProviderId;
@@ -47,19 +47,24 @@ export interface TTSConfig {
 	modelId?: string;
 	/** Audio container — relevant for OpenRouter ("wav" | "mp3" | "flac"). */
 	format?: string;
-	/** Suno: override the API base URL (community wrappers like
-	 * api.sunoapi.org vary). */
-	baseUrl?: string;
-	/** Suno: style hint ("lo-fi piano", "rock", …). */
-	style?: string;
-	/** Suno: render an instrumental track without vocals. */
-	instrumental?: boolean;
 }
 
 export type AgentAutonomyLevel = "suggested" | "auto-safe" | "full";
 
-/** Which API hosts chat completions for an agent (tools + text). */
-export type BanterLlmProvider = "openrouter" | "openai";
+/** Which API hosts chat completions for an agent (tools + text).
+ *
+ * - `openrouter`: OpenRouter API key (PKCE-OAuth or pasted). Chat + audio-output
+ *   chat models + STT via /v1/audio/transcriptions.
+ * - `openai`: OpenAI platform `sk-...` key. api.openai.com — chat, TTS, STT,
+ *   image generation.
+ * - `openai-codex`: ChatGPT Plus/Pro OAuth (PKCE). Hits chatgpt.com/backend-api;
+ *   text/chat only — voice/STT/image on OpenAI still require the platform key.
+ *   This is a service-layer constraint, not a code one.
+ * - `elizacloud`: Eliza Cloud API key (pasted; OAuth/PKCE not yet exposed in
+ *   their public docs). OpenAI-compatible base at elizacloud.ai/api/v1 —
+ *   chat, image, voice cloning, video.
+ */
+export type BanterLlmProvider = "openrouter" | "openai" | "openai-codex" | "elizacloud";
 
 export interface AgentToolPermissions {
 	controlOverlays: boolean;
@@ -91,8 +96,8 @@ export interface BanterConfig {
 	 * Requires the mic transcription subsystem to find a non-agent audio
 	 * source (a mic participant or camera+mic combo). */
 	voiceContext?: boolean;
-	/** Mic STT backend. OpenRouter uses the stored OpenRouter key; OpenAI uses the platform `openai` key. */
-	transcriptionProvider?: "openrouter" | "openai";
+	/** Mic STT backend. OpenRouter uses the stored OpenRouter key; OpenAI uses the platform `openai` key; Eliza Cloud uses the saved `elizacloud` key. */
+	transcriptionProvider?: "openrouter" | "openai" | "elizacloud";
 	/** Model id for mic transcription — OpenRouter slug or OpenAI transcription model, depending on `transcriptionProvider`. */
 	transcriptionModel?: string;
 	/** When true, attach a downscaled live program-preview JPEG to the latest user turn so vision-capable models can see the composited stream. */

@@ -3,7 +3,7 @@
 // to state + (re)starts the engine.
 
 import { Modal } from "../components/overlays";
-import { DEFAULT_BANTER_PROMPT, DEFAULT_BANTER_MODEL, DEFAULT_OPENAI_BANTER_MODEL } from "./banter-engine";
+import { DEFAULT_BANTER_PROMPT, DEFAULT_BANTER_MODEL, DEFAULT_OPENAI_BANTER_MODEL, DEFAULT_ELIZACLOUD_BANTER_MODEL } from "./banter-engine";
 import { SAFE_TOOL_PERMISSIONS } from "./tool-policy";
 import { getStoredApiKey } from "../tts/registry";
 import { hasSecret } from "../auth/secrets-cache";
@@ -13,6 +13,10 @@ import {
 	OPENAI_TRANSCRIBE_MODEL_OPTIONS,
 	DEFAULT_OPENAI_TRANSCRIBE_MODEL,
 } from "../transcription/openai-stt";
+import {
+	ELIZACLOUD_TRANSCRIBE_MODEL_OPTIONS,
+	DEFAULT_ELIZACLOUD_TRANSCRIBE_MODEL,
+} from "../transcription/elizacloud-stt";
 import type { BanterConfig, BanterLlmProvider } from "../core/types";
 
 export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig | null> {
@@ -47,9 +51,11 @@ export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig |
 				<span>LLM provider</span>
 				<select data-field="llmProvider">
 					<option value="openrouter">OpenRouter</option>
-					<option value="openai">OpenAI (API key / Codex)</option>
+					<option value="openai">OpenAI platform key</option>
+					<option value="openai-codex">ChatGPT (Codex OAuth) — text only</option>
+					<option value="elizacloud">Eliza Cloud</option>
 				</select>
-				<small class="tts-config__hint">OpenRouter: one browser login covers TTS, STT, and LLM. OpenAI: use a platform <code>sk-</code> key (Chat Completions, Speech, Transcriptions, Images — save it under Settings).</small>
+				<small class="tts-config__hint">OpenRouter: one OAuth login covers chat, TTS, and STT. OpenAI platform: <code>sk-</code> key for chat, TTS, transcriptions, and images. ChatGPT (Codex): OAuth-bound; chat/text only (voice + image still need the platform key). Eliza Cloud: pasted key, OpenAI-compatible — chat + image + voice cloning.</small>
 			</label>
 
 			<label class="tts-config__row">
@@ -85,6 +91,7 @@ export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig |
 				<select data-field="transcriptionProvider">
 					<option value="openrouter">OpenRouter</option>
 					<option value="openai">OpenAI</option>
+					<option value="elizacloud">Eliza Cloud</option>
 				</select>
 			</label>
 
@@ -141,23 +148,28 @@ export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig |
 			'Default <code>openrouter/free</code> auto-routes to free models that support tool calling (rate limits apply). For higher throughput: <code>anthropic/claude-haiku-4-5</code>, <code>google/gemini-2.5-flash</code>, or any model from <a href="https://openrouter.ai/models?supported_parameters=tools" target="_blank" rel="noopener">openrouter.ai/models?supported_parameters=tools</a>.';
 		const hintOpenAi =
 			'Default <code>gpt-5.3-codex</code> matches the current Codex-class agentic model (Chat Completions + tools). For the general flagship, OpenAI documents <code>gpt-5.5</code> as the default starting point. Verify ids in <a href="https://platform.openai.com/docs/models" target="_blank" rel="noopener">platform.openai.com/docs/models</a> or the <a href="https://developers.openai.com/api/docs/models/all" target="_blank" rel="noopener">full model list</a>.';
+		const hintCodex =
+			'Bound to your ChatGPT Plus/Pro subscription via OAuth. Use Codex-class model ids that ChatGPT exposes through the Codex backend (e.g. <code>gpt-5.3-codex</code>). Requests charge against your ChatGPT plan, not the platform API.';
+		const hintElizaCloud =
+			'OpenAI-compatible chat completions at <code>elizacloud.ai/api/v1</code>. Documented model ids include <code>gpt-4o-mini</code> (small/fast), <code>gpt-4o</code>, <code>claude-3-5-sonnet</code>, <code>gemini-2.0-flash</code>. See <a href="https://www.elizacloud.ai/docs/installation" target="_blank" rel="noopener">elizacloud.ai/docs</a>.';
 
 		const syncModelHint = (): void => {
 			const p = llmProvider.value as BanterLlmProvider;
-			modelHint.innerHTML = p === "openai" ? hintOpenAi : hintOpenRouter;
+			modelHint.innerHTML = p === "openai" ? hintOpenAi : p === "openai-codex" ? hintCodex : p === "elizacloud" ? hintElizaCloud : hintOpenRouter;
 		};
 
 		const prov: BanterLlmProvider = initial?.llmProvider ?? "openrouter";
 		llmProvider.value = prov;
-		model.value =
-			initial?.llmModel ??
-			(prov === "openai" ? DEFAULT_OPENAI_BANTER_MODEL : DEFAULT_BANTER_MODEL);
+		model.value = initial?.llmModel ?? pickDefaultModel(prov);
 		syncModelHint();
 		llmProvider.addEventListener("change", () => {
 			syncModelHint();
 			const p = llmProvider.value as BanterLlmProvider;
-			if (p === "openai" && model.value.includes("/")) {
-				model.value = DEFAULT_OPENAI_BANTER_MODEL;
+			// If the current model has an OpenRouter slug shape, swap it
+			// when leaving OpenRouter so we don't carry "vendor/model" into
+			// a non-OpenRouter endpoint that rejects the prefix.
+			if (p !== "openrouter" && model.value.includes("/")) {
+				model.value = pickDefaultModel(p);
 			}
 		});
 
@@ -176,16 +188,25 @@ export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig |
 		const hintTrxOpenRouter =
 			"OpenRouter STT — cumulative cost from the API when available; perf HUD (⌘⇧P). Gemini Flash is the cheap default.";
 		const hintTrxOpenAi = "OpenAI <code>/v1/audio/transcriptions</code> — uses your saved OpenAI platform key.";
+		const hintTrxElizaCloud = "Eliza Cloud <code>/api/v1/audio/transcriptions</code> — uses your saved Eliza Cloud key.";
 
+		type TrxProvider = "openrouter" | "openai" | "elizacloud";
 		const fillTrxModelOptions = (): void => {
-			const p = transcriptionProvider.value as "openrouter" | "openai";
-			const opts = p === "openai" ? OPENAI_TRANSCRIBE_MODEL_OPTIONS : TRANSCRIBE_MODEL_OPTIONS;
+			const p = transcriptionProvider.value as TrxProvider;
+			const opts =
+				p === "openai"
+					? OPENAI_TRANSCRIBE_MODEL_OPTIONS
+					: p === "elizacloud"
+						? ELIZACLOUD_TRANSCRIBE_MODEL_OPTIONS
+						: TRANSCRIBE_MODEL_OPTIONS;
 			const prev = transcriptionModel.value;
 			transcriptionModel.innerHTML = opts.map((o) => `<option value="${o.id}">${o.label} — ${o.note}</option>`).join("");
 			const ids = new Set(opts.map((o) => o.id));
 			if (ids.has(prev)) transcriptionModel.value = prev;
-			else transcriptionModel.value = p === "openai" ? DEFAULT_OPENAI_TRANSCRIBE_MODEL : DEFAULT_TRANSCRIBE_MODEL;
-			trxModelHint.innerHTML = p === "openai" ? hintTrxOpenAi : hintTrxOpenRouter;
+			else
+				transcriptionModel.value =
+					p === "openai" ? DEFAULT_OPENAI_TRANSCRIBE_MODEL : p === "elizacloud" ? DEFAULT_ELIZACLOUD_TRANSCRIBE_MODEL : DEFAULT_TRANSCRIBE_MODEL;
+			trxModelHint.innerHTML = p === "openai" ? hintTrxOpenAi : p === "elizacloud" ? hintTrxElizaCloud : hintTrxOpenRouter;
 		};
 
 		enabled.checked = initial?.enabled ?? true;
@@ -212,7 +233,7 @@ export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig |
 		body.querySelector<HTMLButtonElement>("[data-action=cancel]")!.addEventListener("click", () => modal.close());
 		body.querySelector<HTMLButtonElement>("[data-action=save]")!.addEventListener("click", () => {
 			const p = llmProvider.value as BanterLlmProvider;
-			const defaultModel = p === "openai" ? DEFAULT_OPENAI_BANTER_MODEL : DEFAULT_BANTER_MODEL;
+			const defaultModel = pickDefaultModel(p);
 			const config: BanterConfig = {
 				enabled: enabled.checked,
 				twitchChannel: channel.value.trim(),
@@ -222,7 +243,7 @@ export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig |
 				voiceActivityGate: vad.checked,
 				proactiveOnTranscript: proactive.checked,
 				voiceContext: voiceContext.checked,
-				transcriptionProvider: transcriptionProvider.value as "openrouter" | "openai",
+				transcriptionProvider: transcriptionProvider.value as "openrouter" | "openai" | "elizacloud",
 				transcriptionModel: transcriptionModel.value,
 				visionProgramPreview: visionProgramPreview.checked,
 				autonomyLevel: autonomyLevel.value as BanterConfig["autonomyLevel"],
@@ -235,4 +256,16 @@ export function pickBanterConfig(initial?: BanterConfig): Promise<BanterConfig |
 			modal.close();
 		});
 	});
+}
+
+function pickDefaultModel(provider: BanterLlmProvider): string {
+	switch (provider) {
+		case "openai":
+		case "openai-codex":
+			return DEFAULT_OPENAI_BANTER_MODEL;
+		case "elizacloud":
+			return DEFAULT_ELIZACLOUD_BANTER_MODEL;
+		default:
+			return DEFAULT_BANTER_MODEL;
+	}
 }

@@ -1,5 +1,7 @@
 import { connectOpenRouterOAuth, OPENROUTER_KEY } from "../auth/openrouter-oauth";
 import { openOpenAiApiKeyDialog, OPENAI_API_KEY } from "../auth/openai-api";
+import { connectCodexOAuth, disconnectCodex, isCodexConnected } from "../auth/openai-codex-oauth";
+import { openElizaCloudApiKeyDialog, disconnectElizaCloud, isElizaCloudConnected } from "../auth/elizacloud-api";
 import { hasSecret } from "../auth/secrets-cache";
 import { userMessageFor } from "../core/errors";
 import type { StreamQuality } from "../core/types";
@@ -20,6 +22,7 @@ import type { WorkspaceAppId } from "../../bun/workspace-apps";
 import { serializeState } from "../state/persistence";
 import type { StudioFocusMode } from "../core/types";
 import { openSceneImportDialog } from "./scene-import-dialog";
+import { openCarrotsPanel } from "./carrots-panel";
 
 type UtilityKind = "studio" | "chat" | "producer" | "stats" | "overlay" | "prompter";
 
@@ -64,6 +67,10 @@ export function openSettingsDialog(): void {
 	});
 	body.querySelector<HTMLButtonElement>("[data-action=openrouter]")?.addEventListener("click", () => void connectOpenRouter());
 	body.querySelector<HTMLButtonElement>("[data-action=openai-key]")?.addEventListener("click", () => void openOpenAiApiKeyDialog());
+	body.querySelector<HTMLButtonElement>("[data-action=codex]")?.addEventListener("click", () => void connectCodex());
+	body.querySelector<HTMLButtonElement>("[data-action=codex-disconnect]")?.addEventListener("click", () => void runDisconnectCodex());
+	body.querySelector<HTMLButtonElement>("[data-action=elizacloud]")?.addEventListener("click", () => void openElizaCloudApiKeyDialog());
+	body.querySelector<HTMLButtonElement>("[data-action=elizacloud-disconnect]")?.addEventListener("click", () => void runDisconnectElizaCloud());
 	body.querySelector<HTMLButtonElement>("[data-action=assistant]")?.addEventListener("click", () => {
 		void createParticipantFromKind("text")
 			.then((id) => { if (id) toast("Text assistant added", "success"); })
@@ -94,6 +101,10 @@ export function openSettingsDialog(): void {
 		modal.close();
 		openSceneImportDialog();
 	});
+	body.querySelector<HTMLButtonElement>("[data-action=carrots]")?.addEventListener("click", () => {
+		modal.close();
+		openCarrotsPanel();
+	});
 	body.querySelectorAll<HTMLInputElement>('input[name="focusMode"]').forEach((radio) => {
 		radio.addEventListener("change", () => {
 			if (radio.checked) studio.setStudioPrefs({ focusMode: radio.value as StudioFocusMode });
@@ -113,6 +124,8 @@ function renderSettings(): string {
 	const quality = studio.state.stream.quality;
 	const openRouterConnected = hasSecret(OPENROUTER_KEY);
 	const openAiKeySaved = hasSecret(OPENAI_API_KEY);
+	const codexConnected = isCodexConnected();
+	const elizaCloudConnected = isElizaCloudConnected();
 	const focusMode = studio.state.studioPrefs?.focusMode ?? "cohost";
 	const workspaceApps = [
 		["windsurf", "Windsurf"],
@@ -176,12 +189,59 @@ function renderSettings(): string {
 
 		<section class="settings-section">
 			<div class="settings-section__head">
-				<h3>AI Chat & Agents</h3>
-				<p>${PRODUCT_PROMISE}: ${PRODUCT_TAGLINE} OpenRouter is ${openRouterConnected ? "connected" : "not connected"} (TTS, speech-to-text, default banter LLM). OpenAI API key is ${openAiKeySaved ? "saved" : "not set"}.</p>
+				<h3>AI Providers — chat, voice, transcription, image</h3>
+				<p>${PRODUCT_PROMISE}: ${PRODUCT_TAGLINE} Connect any combination; agents pick a provider per-feature in their settings.</p>
+				<table class="settings-capability-matrix">
+					<thead>
+						<tr><th>Provider</th><th>Auth</th><th>Chat</th><th>Voice (TTS)</th><th>Transcription</th><th>Image</th><th>Status</th></tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td>OpenRouter</td>
+							<td>PKCE OAuth</td>
+							<td>✓</td><td>✓</td><td>✓</td><td>—</td>
+							<td>${openRouterConnected ? "Connected" : "Not connected"}</td>
+						</tr>
+						<tr>
+							<td>OpenAI platform</td>
+							<td><code>sk-…</code> key</td>
+							<td>✓</td><td>✓</td><td>✓</td><td>✓</td>
+							<td>${openAiKeySaved ? "Saved" : "Not saved"}</td>
+						</tr>
+						<tr>
+							<td>ChatGPT (Codex)</td>
+							<td>PKCE OAuth</td>
+							<td>✓</td><td>—*</td><td>—*</td><td>—*</td>
+							<td>${codexConnected ? "Connected" : "Not connected"}</td>
+						</tr>
+						<tr>
+							<td>Eliza Cloud</td>
+							<td>API key†</td>
+							<td>✓</td><td>✓</td><td>✓</td><td>✓</td>
+							<td>${elizaCloudConnected ? "Connected" : "Not connected"}</td>
+						</tr>
+						<tr>
+							<td>ElevenLabs</td>
+							<td>API key</td>
+							<td>—</td><td>✓</td><td>✓ (Scribe)</td><td>—</td>
+							<td>Per-agent voice settings</td>
+						</tr>
+					</tbody>
+				</table>
+				<p class="settings-section__footnote">* Codex OAuth tokens authenticate against <code>chatgpt.com/backend-api</code>, which only exposes chat. Voice/STT/image on OpenAI live on <code>api.openai.com</code> and require the platform key above — a service-layer split, not a missing implementation.</p>
+				<p class="settings-section__footnote">† Eliza Cloud's public docs describe a browser-assisted API-key flow (no published OAuth/PKCE spec). If they publish one, the Connect button will be upgraded.</p>
 			</div>
 			<div class="settings-grid settings-grid--two">
-				<button type="button" class="settings-action" data-action="openrouter">Connect OpenRouter</button>
+				<button type="button" class="settings-action" data-action="openrouter">${openRouterConnected ? "Reconnect OpenRouter" : "Connect OpenRouter"}</button>
 				<button type="button" class="settings-action" data-action="openai-key">${openAiKeySaved ? "Update OpenAI API key" : "Save OpenAI API key"}</button>
+			</div>
+			<div class="settings-grid settings-grid--two">
+				<button type="button" class="settings-action" data-action="codex">${codexConnected ? "Reconnect ChatGPT (Codex)" : "Connect ChatGPT (Codex)"}</button>
+				${codexConnected ? '<button type="button" class="settings-action" data-action="codex-disconnect">Disconnect ChatGPT (Codex)</button>' : "<span></span>"}
+			</div>
+			<div class="settings-grid settings-grid--two">
+				<button type="button" class="settings-action" data-action="elizacloud">${elizaCloudConnected ? "Update Eliza Cloud key" : "Connect Eliza Cloud"}</button>
+				${elizaCloudConnected ? '<button type="button" class="settings-action" data-action="elizacloud-disconnect">Disconnect Eliza Cloud</button>' : "<span></span>"}
 			</div>
 			<div class="settings-grid settings-grid--two">
 				<button type="button" class="settings-action" data-action="assistant">Add text assistant</button>
@@ -207,6 +267,16 @@ function renderSettings(): string {
 					<input type="radio" name="focusMode" value="full"${focusMode === "full" ? " checked" : ""} />
 					<span>Full studio</span>
 				</label>
+			</div>
+		</section>
+
+		<section class="settings-section">
+			<div class="settings-section__head">
+				<h3>Carrots — sandboxed plug-ins</h3>
+				<p>Each carrot runs as its own Bun process with explicit, user-granted permissions (filesystem, env, child-process spawn, FFI). Used for things like local TTS engines, custom overlays, or anything else you want to drop in without changing core Weclank code.</p>
+			</div>
+			<div class="settings-actions-row">
+				<button type="button" class="settings-action" data-action="carrots">Open Carrots panel…</button>
 			</div>
 		</section>
 
@@ -359,6 +429,36 @@ async function connectOpenRouter(): Promise<void> {
 		toast("OpenRouter connected", "success");
 	} catch (err) {
 		toast(`OpenRouter connect failed: ${userMessageFor(err)}`, "error");
+	}
+}
+
+async function connectCodex(): Promise<void> {
+	toast("Opening ChatGPT (Codex) login in your browser...", "info");
+	try {
+		await connectCodexOAuth();
+		toast("ChatGPT (Codex) connected — Codex models available in agent settings", "success");
+	} catch (err) {
+		toast(`ChatGPT (Codex) connect failed: ${userMessageFor(err)}`, "error");
+	}
+}
+
+async function runDisconnectCodex(): Promise<void> {
+	if (!window.confirm("Sign out of ChatGPT (Codex)? Agents using Codex models will need another provider.")) return;
+	try {
+		await disconnectCodex();
+		toast("ChatGPT (Codex) disconnected", "success");
+	} catch (err) {
+		toast(`Disconnect failed: ${userMessageFor(err)}`, "error");
+	}
+}
+
+async function runDisconnectElizaCloud(): Promise<void> {
+	if (!window.confirm("Remove the saved Eliza Cloud API key?")) return;
+	try {
+		await disconnectElizaCloud();
+		toast("Eliza Cloud disconnected", "success");
+	} catch (err) {
+		toast(`Disconnect failed: ${userMessageFor(err)}`, "error");
 	}
 }
 

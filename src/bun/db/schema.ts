@@ -91,5 +91,15 @@ function migrate(d: Database): void {
 		);
 
 		CREATE INDEX IF NOT EXISTS idx_scripts_user_id ON scripts(user_id);
+
+		CREATE TABLE IF NOT EXISTS carrots (
+			id TEXT PRIMARY KEY,
+			manifest_json TEXT NOT NULL,
+			source_path TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 0,
+			granted_permissions_json TEXT NOT NULL DEFAULT '{}',
+			installed_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		);
 	`);
 }

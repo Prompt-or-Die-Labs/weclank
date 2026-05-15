@@ -1,14 +1,19 @@
 // Producer tray — hidden bottom panel over the stats / mixer. Never on the
 // broadcast canvas; stays between the developer and the studio.
 //
-// Columns:
-//   - Private studio chat: unified transcript (host mic STT when agents
-//     listen, your [producer] lines, agent replies). Off-stream only.
-//   - Actions: pending tool approvals + emote / cue grid.
-//   - Run of show: segment list + timing.
-//   - Tools: scene, music, record — plus compact audience intelligence.
+// Layout: tabbed content area over a persistent command rail.
+//   Tabs:
+//     - Talk:     mic-driven private chat with the selected agent.
+//     - Cue:      pending AI actions + emote / cue tile grid.
+//     - Run:      run-of-show segment list with inline action drawer.
+//     - Audience: mood / sentiment / FAQ / flags from the audience engine.
+//   Rail (always visible):
+//     - Segment chip (live + countdown), scene picker, host-mic status,
+//       music slider, REC, PANIC MUTE.
 //
 // Toggle: backtick (`) outside text fields, or the bottom handle.
+// Tab shortcuts: 1=Talk, 2=Cue, 3=Run, 4=Audience (when tray is open and
+// focus isn't inside a text field).
 
 import { Component } from "../core/component";
 import { studio } from "../state/studio-store";
@@ -35,7 +40,19 @@ import { escapeHtml } from "./primitives";
 import { userMessageFor } from "../core/errors";
 
 const STORAGE_KEY = "studio.producerTray.open";
+const TAB_STORAGE_KEY = "studio.producerTray.tab";
 const CHAT_FEED_CAP = 100;
+
+type TrayTab = "talk" | "cue" | "run" | "audience";
+const TABS: Array<{ id: TrayTab; label: string; hotkey: string }> = [
+	{ id: "talk", label: "Talk", hotkey: "1" },
+	{ id: "cue", label: "Cue", hotkey: "2" },
+	{ id: "run", label: "Run", hotkey: "3" },
+	{ id: "audience", label: "Audience", hotkey: "4" },
+];
+function isTrayTab(v: string | null): v is TrayTab {
+	return v === "talk" || v === "cue" || v === "run" || v === "audience";
+}
 
 interface EmoteDef {
 	id: string;
@@ -66,6 +83,7 @@ type StudioChatRow = StudioChatRowHost | StudioChatRowProducer | StudioChatRowAg
 
 interface State {
 	open: boolean;
+	activeTab: TrayTab;
 	agents: Participant[];
 	scenes: Scene[];
 	activeSceneId: string;
@@ -92,10 +110,13 @@ export class ProducerTray extends Component<State> {
 
 	constructor() {
 		const stored = (typeof localStorage !== "undefined" && localStorage.getItem(STORAGE_KEY)) === "1";
+		const storedTab = typeof localStorage !== "undefined" ? localStorage.getItem(TAB_STORAGE_KEY) : null;
+		const activeTab: TrayTab = isTrayTab(storedTab) ? storedTab : "talk";
 		const agents = collectAgents(studio.state.participants);
 		const hostMicForAgents = computeHostMicForAgents();
 		super({
 			open: stored,
+			activeTab,
 			agents,
 			scenes: studio.state.scenes,
 			activeSceneId: studio.state.activeSceneId,
@@ -151,6 +172,7 @@ export class ProducerTray extends Component<State> {
 	}
 
 	protected template(): string {
+		const tab = this.state.activeTab;
 		return `
 			<button class="producer-tray__handle" data-action="toggle" aria-expanded="${this.state.open ? "true" : "false"}" aria-label="${this.state.open ? "Close private studio tray" : "Open private studio tray"}">
 				<span class="producer-tray__handle-grip"></span>
@@ -158,16 +180,48 @@ export class ProducerTray extends Component<State> {
 				<span class="producer-tray__handle-hint">\`</span>
 			</button>
 			<div class="producer-tray__panel ${this.state.open ? "is-open" : ""}" aria-hidden="${this.state.open ? "false" : "true"}">
-				<div class="producer-tray__col producer-tray__col--studio-chat">
-					<div class="producer-tray__col-head producer-tray__col-head--stacked">
-						<div class="producer-tray__chat-head-text">
-							<span class="section-header">Private studio chat</span>
-							<p class="producer-tray__chat-intro">
-								Not on stream. Host mic lines appear here when an agent’s banter is running with <strong>Listen to my mic</strong> — same text the co-host hears.
-							</p>
-						</div>
-						${this.renderTargetSelect()}
-					</div>
+				<div class="producer-tray__tabs" role="tablist" aria-label="Producer modes">
+					${TABS.map((t) => `
+						<button
+							type="button"
+							role="tab"
+							aria-selected="${tab === t.id ? "true" : "false"}"
+							aria-controls="producer-tray-panel-${t.id}"
+							class="producer-tray__tab ${tab === t.id ? "is-active" : ""}"
+							data-tab="${t.id}"
+						>
+							<span class="producer-tray__tab-label">${escapeHtml(t.label)}</span>
+							<span class="producer-tray__tab-key">${escapeHtml(t.hotkey)}</span>
+						</button>
+					`).join("")}
+					<div class="producer-tray__tab-spacer"></div>
+					${this.renderHeaderContext()}
+				</div>
+
+				<div class="producer-tray__content" data-ref="tab-content">
+					<section role="tabpanel" id="producer-tray-panel-talk" aria-labelledby="producer-tray-tab-talk" ${tab === "talk" ? "" : "hidden"} class="producer-tray__pane producer-tray__pane--talk">
+						${this.renderTalkPane()}
+					</section>
+					<section role="tabpanel" id="producer-tray-panel-cue" ${tab === "cue" ? "" : "hidden"} class="producer-tray__pane producer-tray__pane--cue">
+						${this.renderCuePane()}
+					</section>
+					<section role="tabpanel" id="producer-tray-panel-run" ${tab === "run" ? "" : "hidden"} class="producer-tray__pane producer-tray__pane--run">
+						${this.renderRunPane()}
+					</section>
+					<section role="tabpanel" id="producer-tray-panel-audience" ${tab === "audience" ? "" : "hidden"} class="producer-tray__pane producer-tray__pane--audience">
+						${this.renderAudiencePane()}
+					</section>
+				</div>
+
+				${this.renderCommandRail()}
+			</div>
+		`;
+	}
+
+	private renderTalkPane(): string {
+		return `
+			<div class="producer-tray__talk-grid">
+				<div class="producer-tray__talk-feed-col">
 					<div class="producer-tray__mic-status" role="status">${this.renderMicStatus()}</div>
 					<div
 						class="producer-tray__reply-feed"
@@ -179,70 +233,132 @@ export class ProducerTray extends Component<State> {
 					>
 						${this.renderStudioChatFeed()}
 					</div>
+				</div>
+				<div class="producer-tray__talk-composer-col">
+					<div class="producer-tray__composer-head">
+						${this.renderTargetSelect()}
+					</div>
 					<label class="producer-tray__visually-hidden" for="producer-tray-private-msg">Private message to agent</label>
 					<textarea
 						id="producer-tray-private-msg"
 						class="producer-tray__textarea"
 						data-field="message"
 						placeholder="Private note to the selected agent — they reply on stream. ⌘↵ or Ctrl+↵ to send."
-						rows="3"
 					></textarea>
 					<div class="producer-tray__send-row">
 						<span class="producer-tray__hint">Hidden from viewers · audible agent reply</span>
 						<button type="button" class="producer-tray__send" data-action="send">Send</button>
 					</div>
 				</div>
+			</div>
+		`;
+	}
 
-				<div class="producer-tray__col producer-tray__col--emotes">
-					<div class="producer-tray__col-head">
-						<span class="section-header">Actions</span>
-					</div>
-					${this.renderPendingActions()}
-					<div class="producer-tray__emotes">
-						${EMOTES.map((e) => `
-							<button class="producer-tray__emote" data-emote="${e.id}" title="${escapeHtml(e.subtitle)}">
-								<span class="producer-tray__emote-label">${escapeHtml(e.label)}</span>
-								<span class="producer-tray__emote-sub">${escapeHtml(e.subtitle)}</span>
-							</button>
-						`).join("")}
-					</div>
+	private renderCuePane(): string {
+		return `
+			<div class="producer-tray__cue-pending">
+				${this.renderPendingActions()}
+			</div>
+			<div class="producer-tray__emotes">
+				${EMOTES.map((e) => `
+					<button class="producer-tray__emote producer-tray__emote--${e.id}" data-emote="${e.id}" title="${escapeHtml(e.subtitle)}">
+						<span class="producer-tray__emote-label">${escapeHtml(e.label)}</span>
+						<span class="producer-tray__emote-sub">${escapeHtml(e.subtitle)}</span>
+					</button>
+				`).join("")}
+			</div>
+		`;
+	}
+
+	private renderRunPane(): string {
+		return `
+			<div class="producer-tray__pane-head">
+				<span class="section-header">Run of show</span>
+				<div class="producer-tray__run-actions">
+					<button type="button" data-action="run-next">Next</button>
+					<button type="button" data-action="run-add">Add</button>
+				</div>
+			</div>
+			${this.renderRunOfShow()}
+		`;
+	}
+
+	private renderAudiencePane(): string {
+		return `
+			<div class="producer-tray__pane-head">
+				<span class="section-header">Audience intelligence</span>
+			</div>
+			${this.renderAudienceIntelligence()}
+		`;
+	}
+
+	/** Right-side strip of the tab bar — shows the active segment + target
+	 * agent so context never disappears when the user is on a non-Run tab. */
+	private renderHeaderContext(): string {
+		const active = activeSegment(this.state.runOfShow);
+		const targetName = this.state.agents.find((a) => a.id === this.state.targetAgentId)?.displayName;
+		return `
+			<div class="producer-tray__tab-context">
+				${active ? `
+					<span class="producer-tray__tab-segment" title="Live segment">
+						<span class="producer-tray__tab-segment-dot"></span>
+						${escapeHtml(active.title)}
+					</span>
+				` : ""}
+				${targetName ? `<span class="producer-tray__tab-target">→ ${escapeHtml(targetName)}</span>` : ""}
+			</div>
+		`;
+	}
+
+	private renderCommandRail(): string {
+		const active = activeSegment(this.state.runOfShow);
+		const remaining = active ? remainingSeconds(active, this.state.now) : null;
+		return `
+			<div class="producer-tray__rail" role="toolbar" aria-label="Studio controls">
+				<div class="producer-tray__rail-item producer-tray__rail-item--segment">
+					<span class="producer-tray__rail-label">Segment</span>
+					<span class="producer-tray__rail-value">
+						${active ? `
+							<span class="producer-tray__rail-dot producer-tray__rail-dot--live"></span>
+							${escapeHtml(active.title)}
+							<span class="producer-tray__rail-countdown ${remaining !== null && remaining <= 30 ? "is-urgent" : ""}">${remaining !== null ? formatCountdown(remaining) : "--:--"}</span>
+						` : `<span class="producer-tray__rail-muted">No segment running</span>`}
+					</span>
 				</div>
 
-				<div class="producer-tray__col producer-tray__col--run">
-					<div class="producer-tray__col-head">
-						<span class="section-header">Run</span>
-						<div class="producer-tray__run-actions">
-							<button type="button" data-action="run-next">Next</button>
-							<button type="button" data-action="run-add">Add</button>
-						</div>
-					</div>
-					${this.renderRunOfShow()}
+				<div class="producer-tray__rail-item">
+					<span class="producer-tray__rail-label">Scene</span>
+					<select data-field="scene" class="producer-tray__rail-select">
+						${this.state.scenes.map((s) => `<option value="${escapeHtml(s.id)}"${s.id === this.state.activeSceneId ? " selected" : ""}>${escapeHtml(s.name)}</option>`).join("")}
+					</select>
 				</div>
 
-				<div class="producer-tray__col producer-tray__col--tools">
-					<div class="producer-tray__col-head">
-						<span class="section-header">Tools</span>
-					</div>
-
-					${this.renderAudienceIntelligence()}
-
-					<label class="producer-tray__tool-row">
-						<span class="producer-tray__tool-label">Scene</span>
-						<select data-field="scene">
-							${this.state.scenes.map((s) => `<option value="${escapeHtml(s.id)}"${s.id === this.state.activeSceneId ? " selected" : ""}>${escapeHtml(s.name)}</option>`).join("")}
-						</select>
-					</label>
-
-					<label class="producer-tray__tool-row">
-						<span class="producer-tray__tool-label">Music</span>
-						<input type="range" min="0" max="100" value="${Math.round(this.state.musicVolume * 100)}" data-field="music" />
-					</label>
-
-					<div class="producer-tray__tool-buttons">
-						<button class="producer-tray__tool-btn ${this.state.recording ? "is-on" : ""}" data-action="record">${this.state.recording ? "■ STOP" : "○ REC"}</button>
-						<button class="producer-tray__tool-btn" data-action="panic">Panic mute</button>
-					</div>
+				<div class="producer-tray__rail-item">
+					<span class="producer-tray__rail-label">Host mic</span>
+					<span class="producer-tray__rail-value">
+						<span class="producer-tray__rail-dot ${this.state.hostMicForAgents ? "producer-tray__rail-dot--live" : "producer-tray__rail-dot--idle"}"></span>
+						${this.state.hostMicForAgents ? "Listening" : "Idle"}
+					</span>
 				</div>
+
+				<div class="producer-tray__rail-item">
+					<span class="producer-tray__rail-label">Music</span>
+					<input type="range" min="0" max="100" value="${Math.round(this.state.musicVolume * 100)}" data-field="music" class="producer-tray__rail-slider" aria-label="Background music volume" />
+				</div>
+
+				<div class="producer-tray__rail-spacer"></div>
+
+				<button
+					type="button"
+					class="producer-tray__rail-btn producer-tray__rail-btn--rec ${this.state.recording ? "is-on" : ""}"
+					data-action="record"
+				>
+					<span class="producer-tray__rail-btn-glyph">${this.state.recording ? "■" : "○"}</span>
+					${this.state.recording ? "STOP" : "REC"}
+				</button>
+				<button type="button" class="producer-tray__rail-btn producer-tray__rail-btn--panic" data-action="panic">
+					Panic mute
+				</button>
 			</div>
 		`;
 	}
@@ -408,6 +524,7 @@ export class ProducerTray extends Component<State> {
 
 	protected afterMount(): void {
 		this.bindToggle();
+		this.bindTabs();
 		this.bindForm();
 		this.bindHotkey();
 		this.unsubReplies = banterEngine.subscribeReplies((reply: AgentReply) => {
@@ -438,6 +555,7 @@ export class ProducerTray extends Component<State> {
 	protected update(): void {
 		super.update();
 		this.bindToggle();
+		this.bindTabs();
 		this.bindForm();
 	}
 
@@ -573,16 +691,37 @@ export class ProducerTray extends Component<State> {
 	}
 
 	private onWindowKey = (e: KeyboardEvent): void => {
+		const t = e.target;
+		const inField = t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
 		// Backtick toggles the tray. Skip when typing in any field —
 		// otherwise the user can never type a `<code>` in chat.
-		if (e.key !== "`") return;
-		const t = e.target;
-		if (t instanceof HTMLElement) {
-			if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
+		if (e.key === "`" && !inField) {
+			e.preventDefault();
+			this.toggle();
+			return;
 		}
-		e.preventDefault();
-		this.toggle();
+		// Tab hotkeys 1–4 (only when tray is open and we're not typing).
+		if (!this.state.open || inField) return;
+		const hit = TABS.find((tab) => tab.hotkey === e.key);
+		if (hit) {
+			e.preventDefault();
+			this.setActiveTab(hit.id);
+		}
 	};
+
+	private setActiveTab(tab: TrayTab): void {
+		if (tab === this.state.activeTab) return;
+		this.setState({ activeTab: tab });
+		try { localStorage.setItem(TAB_STORAGE_KEY, tab); } catch { /* unavailable */ }
+	}
+
+	private bindTabs(): void {
+		for (const btn of this.$$<HTMLButtonElement>("[data-tab]")) {
+			const id = btn.dataset["tab"];
+			if (!isTrayTab(id ?? "")) continue;
+			this.on(btn, "click", () => this.setActiveTab(id as TrayTab));
+		}
+	}
 
 	private bindHotkey(): void {
 		window.addEventListener("keydown", this.onWindowKey);
@@ -873,4 +1012,23 @@ function producerCue(text: string): { author: string; text: string; timestamp: n
 		timestamp: Date.now(),
 		meta: { source: "producer-cue" },
 	};
+}
+
+/** Currently-live segment, if any. */
+function activeSegment(runOfShow: RunOfShowState): ShowSegment | null {
+	if (!runOfShow.activeSegmentId) return null;
+	return runOfShow.segments.find((s) => s.id === runOfShow.activeSegmentId) ?? null;
+}
+
+/** Seconds remaining on the active segment relative to `now`. */
+function remainingSeconds(segment: ShowSegment, now: number): number {
+	if (!segment.startedAt) return segment.durationSec;
+	const elapsed = Math.floor((now - segment.startedAt) / 1000);
+	return Math.max(0, segment.durationSec - elapsed);
+}
+
+function formatCountdown(seconds: number): string {
+	const m = Math.floor(seconds / 60);
+	const s = seconds % 60;
+	return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }

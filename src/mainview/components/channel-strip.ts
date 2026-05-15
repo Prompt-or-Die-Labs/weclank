@@ -70,17 +70,27 @@ export class ChannelStrip extends Component<State> {
 		const color = brand ? BRAND_COLORS[brand] : "var(--text-2)";
 		const label = brand ? BRAND_LABELS[brand] : "Custom";
 		const glyph = brand ? Brands[brand](14) : Icons.layoutSwap(14);
-		const title = `${label}${channel.label && channel.label !== label ? ` — ${channel.label}` : ""}${active ? " · active" : ""}`;
+		const friendly = `${label}${channel.label && channel.label !== label ? ` — ${channel.label}` : ""}`;
+		const title = `${friendly}${active ? " · active" : ""} — click to toggle, right-click for options`;
 		return `
-			<button
-				class="channel-strip__chip${active ? " is-active" : ""}"
-				data-channel-id="${escapeHtml(channel.id)}"
-				type="button"
-				title="${escapeHtml(title)}"
-				aria-label="${escapeHtml(title)}"
-				aria-pressed="${active ? "true" : "false"}"
-				style="--chip-color: ${color};"
-			>${glyph}</button>
+			<div class="channel-strip__chip-wrap">
+				<button
+					class="channel-strip__chip${active ? " is-active" : ""}"
+					data-channel-id="${escapeHtml(channel.id)}"
+					type="button"
+					title="${escapeHtml(title)}"
+					aria-label="${escapeHtml(title)}"
+					aria-pressed="${active ? "true" : "false"}"
+					style="--chip-color: ${color};"
+				>${glyph}</button>
+				<button
+					class="channel-strip__chip-remove"
+					data-remove-channel-id="${escapeHtml(channel.id)}"
+					type="button"
+					title="Remove ${escapeHtml(friendly)}"
+					aria-label="Remove ${escapeHtml(friendly)}"
+				><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6"/></svg></button>
+			</div>
 		`;
 	}
 
@@ -93,7 +103,25 @@ export class ChannelStrip extends Component<State> {
 				this.openChannelMenu(id, chip);
 			});
 		}
+		for (const removeBtn of this.$$<HTMLButtonElement>("[data-remove-channel-id]")) {
+			const id = removeBtn.dataset["removeChannelId"] ?? "";
+			this.on(removeBtn, "click", (e) => {
+				e.stopPropagation();
+				void this.removeChannelById(id);
+			});
+		}
 		this.on(this.$("#add-channel"), "click", () => void this.onAdd());
+	}
+
+	private async removeChannelById(channelId: string): Promise<void> {
+		const channel = this.state.channels.find((c) => c.id === channelId);
+		if (!channel) return;
+		if (!window.confirm(`Remove ${channel.label || "this channel"}?`)) return;
+		const { removeChannel } = await import("../streaming/channels");
+		await removeChannel(channelId);
+		const next = (this.state.activeIds ?? []).filter((id) => id !== channelId);
+		studio.setStream({ activeChannelIds: next });
+		toast("Channel removed");
 	}
 
 	private toggle(channelId: string): void {

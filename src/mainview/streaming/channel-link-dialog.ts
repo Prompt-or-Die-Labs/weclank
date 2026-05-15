@@ -115,7 +115,10 @@ export function openChannelLinkDialog(options: LinkOptions = {}): Promise<RtmpCh
 			keyInput.addEventListener("input", () => { streamKey = keyInput.value; });
 
 			body.querySelector<HTMLButtonElement>("[data-action=cancel]")!.addEventListener("click", () => modal.close());
-			body.querySelector<HTMLButtonElement>("[data-action=save]")!.addEventListener("click", async () => {
+			const saveButton = body.querySelector<HTMLButtonElement>("[data-action=save]")!;
+			let saving = false;
+			saveButton.addEventListener("click", async () => {
+				if (saving) return;
 				const error = body.querySelector<HTMLElement>("[data-error]");
 				if (!rtmpUrl.trim() || !streamKey.trim()) {
 					if (error) {
@@ -125,27 +128,52 @@ export function openChannelLinkDialog(options: LinkOptions = {}): Promise<RtmpCh
 					return;
 				}
 				const resolvedLabel = label.trim() || (platform === "custom" ? "Custom" : BRAND_LABELS[platform as BrandId] ?? "Channel");
+				saving = true;
+				const originalLabel = saveButton.textContent;
+				saveButton.disabled = true;
+				saveButton.textContent = editing ? "Saving…" : "Linking…";
+				if (error) error.hidden = true;
 				try {
-					if (editing) {
-						await updateChannel(editing.id, {
-							platform,
-							label: resolvedLabel,
-							rtmpUrl: rtmpUrl.trim(),
-							streamKey: streamKey.trim(),
-						});
-						resolveOnce({ ...editing, platform, label: resolvedLabel, rtmpUrl: rtmpUrl.trim(), streamKey: streamKey.trim() });
-					} else {
-						const created = await addChannel({
-							platform,
-							label: resolvedLabel,
-							rtmpUrl: rtmpUrl.trim(),
-							streamKey: streamKey.trim(),
-						});
-						resolveOnce(created);
-					}
+					// 10s timeout — on macOS, the underlying keychain write
+					// can block on a prompt for keychain access. Without this
+					// guard the dialog hangs forever with no user feedback;
+					// "clicking Link does nothing" was the reported symptom.
+					const saved = await withTimeout(
+						(async () => {
+							if (editing) {
+								await updateChannel(editing.id, {
+									platform,
+									label: resolvedLabel,
+									rtmpUrl: rtmpUrl.trim(),
+									streamKey: streamKey.trim(),
+								});
+								return { ...editing, platform, label: resolvedLabel, rtmpUrl: rtmpUrl.trim(), streamKey: streamKey.trim() } as RtmpChannel;
+							}
+							return addChannel({
+								platform,
+								label: resolvedLabel,
+								rtmpUrl: rtmpUrl.trim(),
+								streamKey: streamKey.trim(),
+							});
+						})(),
+						10_000,
+						"channel save",
+					);
+					resolveOnce(saved);
 					modal.close();
 				} catch (err) {
-					toast(`Save failed: ${userMessageFor(err)}`, "error");
+					console.warn("[channel-link] save failed", err);
+					const msg = err instanceof Error && err.message.includes("timed out")
+						? "Saving timed out — check the macOS keychain prompt or try again."
+						: `Save failed: ${userMessageFor(err)}`;
+					if (error) {
+						error.textContent = msg;
+						error.hidden = false;
+					}
+					toast(msg, "error");
+					saveButton.disabled = false;
+					saveButton.textContent = originalLabel;
+					saving = false;
 				}
 			});
 		};
@@ -161,6 +189,16 @@ export function openChannelLinkDialog(options: LinkOptions = {}): Promise<RtmpCh
 
 function escapeAttr(s: string): string {
 	return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+	return new Promise((resolve, reject) => {
+		const id = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+		promise.then(
+			(value) => { clearTimeout(id); resolve(value); },
+			(error) => { clearTimeout(id); reject(error); },
+		);
+	});
 }
 
 function brandGlyph(id: BrandId, size: number): string {

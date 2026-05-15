@@ -15,10 +15,43 @@ import { openDb, getDbPath } from "./db/schema";
 import { signup, login, checkUser, deleteAccount, lookupUsername } from "./db/users";
 import { loadState, saveState, loadAllSecrets, loadSecret, setSecret, deleteSecret } from "./db/state";
 import { saveScript, saveGeneratedScript, loadScript, listScripts, deleteScript, updateScript } from "./db/scripts";
+import {
+	installFromDir as carrotInstallFromDir,
+	listInstalled as carrotListInstalled,
+	setEnabled as carrotSetEnabled,
+	uninstall as carrotUninstall,
+	getInstalled as carrotGetInstalled,
+} from "./carrots/store";
+import { carrotHost } from "./carrots/host";
+import { readManifest as carrotReadManifest } from "./carrots/manifest";
+import { installFromUrl as carrotInstallFromUrl } from "./carrots/remote";
+import type { CarrotPermissionGrant } from "./carrots/types";
+
+/** Resolve the bundled OmniVoice carrot path. Tried in order:
+ *   1. process.cwd()/carrots/omnivoice (dev mode — running from the repo)
+ *   2. <bun index dir>/../../carrots/omnivoice (also dev — bun launched
+ *      from a subdirectory)
+ *   3. WECLANK_OMNIVOICE_CARROT_DIR env override
+ * Returns null if none exists. Shipped binaries don't currently bundle
+ * the carrot dir; that's tracked separately as a packaging task. */
+function resolveBundledOmnivoiceCarrotPath(): string | null {
+	const override = process.env["WECLANK_OMNIVOICE_CARROT_DIR"];
+	if (override && existsSync(join(override, "carrot.json"))) return override;
+	const candidates = [
+		join(process.cwd(), "carrots", "omnivoice"),
+		join(dirname(fileURLToPath(import.meta.url)), "..", "..", "carrots", "omnivoice"),
+	];
+	for (const candidate of candidates) {
+		if (existsSync(join(candidate, "carrot.json"))) return candidate;
+	}
+	return null;
+}
 import { randomUUID } from "node:crypto";
 import { open, unlink, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { recordingFileName } from "../shared/recording-names";
 import {
 	buildFfmpegArgs,
@@ -155,6 +188,15 @@ interface TranscriptWatcherState {
 }
 
 type StudioUtilityWindowKind = "studio" | "chat" | "producer" | "stats" | "overlay" | "prompter";
+
+/** Wire shape for carrot permission grants over RPC. Mirrors
+ * `CarrotPermissionGrant` from `./carrots/types` but uses plain index
+ * types so PhotoBoothRPC's structural typing accepts it. */
+interface CarrotPermissionGrantWire {
+	host?: Record<string, boolean>;
+	bun?: Record<string, boolean>;
+	isolation?: string;
+}
 type NativeMenuAction =
 	| "main.show"
 	| "main.hide"
@@ -597,6 +639,20 @@ export type PhotoBoothRPC = {
 				params: Record<string, never>;
 				response: { code: string; done: boolean; error?: string };
 			};
+			/** Start the OpenAI Codex (ChatGPT Plus/Pro) PKCE OAuth flow.
+			 * Binds the local callback server to the fixed port 1455 that
+			 * OpenAI's official Codex client_id is registered with — fails
+			 * if that port is busy. */
+			openAiCodexOAuthStart: {
+				params: Record<string, never>;
+				response: { authUrl: string; codeVerifier: string; error?: string };
+			};
+			/** Poll for the Codex OAuth redirect. Resolves with the
+			 * authorization code once the browser hits the callback. */
+			openAiCodexOAuthComplete: {
+				params: Record<string, never>;
+				response: { code: string; done: boolean; error?: string };
+			};
 			/** Latest ffmpeg progress stats — empty object when not live. */
 			getStreamStats: {
 				params: Record<string, never>;
@@ -661,6 +717,109 @@ export type PhotoBoothRPC = {
 			generateScript: {
 				params: { userId: string; topic: string };
 				response: { ok: boolean; content?: string; error?: string };
+			};
+			// ── Carrots (sandboxed plugin runtime) ────────────────────────
+			carrotList: {
+				params: Record<string, never>;
+				response: {
+					ok: boolean;
+					carrots?: Array<{
+						id: string;
+						name: string;
+						version: string;
+						description: string;
+						long_description?: string;
+						enabled: boolean;
+						running: boolean;
+						sourcePath: string;
+						installedAt: number;
+						updatedAt: number;
+						granted: CarrotPermissionGrantWire;
+						requested: CarrotPermissionGrantWire;
+						hasView: boolean;
+					}>;
+					error?: string;
+				};
+			};
+			/** Install a carrot from a local directory (must contain carrot.json). */
+			carrotInstall: {
+				params: { sourcePath: string; granted: CarrotPermissionGrantWire };
+				response: { ok: boolean; id?: string; created?: boolean; error?: string };
+			};
+			/** Install a carrot from a remote https URL (zip or tar.gz). */
+			carrotInstallFromUrl: {
+				params: { url: string; granted: CarrotPermissionGrantWire; expectedId?: string };
+				response: { ok: boolean; id?: string; created?: boolean; error?: string };
+			};
+			carrotEnable: {
+				params: { id: string };
+				response: { ok: boolean; error?: string };
+			};
+			carrotDisable: {
+				params: { id: string };
+				response: { ok: boolean; error?: string };
+			};
+			carrotUninstall: {
+				params: { id: string };
+				response: { ok: boolean; error?: string };
+			};
+			/** Inspect a carrot.json without installing — used by the consent
+			 * dialog to show the user what they're agreeing to. */
+			carrotInspect: {
+				params: { sourcePath: string };
+				response: {
+					ok: boolean;
+					manifest?: {
+						id: string;
+						name: string;
+						version: string;
+						description: string;
+						long_description?: string;
+						requested: CarrotPermissionGrantWire;
+					};
+					error?: string;
+				};
+			};
+			/** Invoke a method on a running carrot. Stays on the Bun side
+			 * for any provider wrapper (e.g. OmniVoiceTTSProvider) to call. */
+			carrotInvoke: {
+				params: { id: string; method: string; params?: unknown; timeoutMs?: number };
+				response: { ok: boolean; payload?: unknown; error?: string };
+			};
+			/** Open the carrot's HTML view (only available when the manifest
+			 * declares a `view` block). */
+			carrotOpenView: {
+				params: { id: string };
+				response: { ok: boolean; windowId?: number; error?: string };
+			};
+			/** Coalesced status + setup RPC for the local voice model
+			 * (OmniVoice). Three actions:
+			 *   - "status" — report what's installed / built / downloaded.
+			 *     No side effects; safe to poll.
+			 *   - "install" — install + enable the bundled OmniVoice
+			 *     carrot. Idempotent — succeeds if already installed.
+			 *   - "prepare" — invoke the carrot's `prepare` method to
+			 *     download the GGUF model weights (~660 MB). Long-running;
+			 *     the renderer should show a spinner and not let the user
+			 *     navigate away. */
+			localVoiceSetup: {
+				params: { action: "status" | "install" | "prepare" };
+				response: {
+					ok: boolean;
+					status?: {
+						carrotInstalled: boolean;
+						carrotEnabled: boolean;
+						carrotRunning: boolean;
+						binaryExists: boolean;
+						modelsExist: boolean;
+						bundledCarrotPath?: string;
+						binaryPath?: string;
+						modelPath?: string;
+						codecPath?: string;
+						buildCommand: string;
+					};
+					error?: string;
+				};
 			};
 		};
 		messages: {
@@ -1405,6 +1564,242 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 				}
 			},
 
+			carrotList: async () => {
+				try {
+					const installed = await carrotListInstalled();
+					return {
+						ok: true,
+						carrots: installed.map((c) => ({
+							id: c.id,
+							name: c.manifest.name,
+							version: c.manifest.version,
+							description: c.manifest.description,
+							long_description: c.manifest.long_description,
+							enabled: c.enabled,
+							running: carrotHost.isRunning(c.id),
+							sourcePath: c.sourcePath,
+							installedAt: c.installedAt,
+							updatedAt: c.updatedAt,
+							granted: c.granted as CarrotPermissionGrantWire,
+							requested: c.manifest.permissions as CarrotPermissionGrantWire,
+							hasView: Boolean(c.manifest.view),
+						})),
+					};
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			carrotInspect: async ({ sourcePath }) => {
+				try {
+					const manifest = await carrotReadManifest(sourcePath);
+					return {
+						ok: true,
+						manifest: {
+							id: manifest.id,
+							name: manifest.name,
+							version: manifest.version,
+							description: manifest.description,
+							long_description: manifest.long_description,
+							requested: manifest.permissions as CarrotPermissionGrantWire,
+						},
+					};
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			carrotInstall: async ({ sourcePath, granted }) => {
+				try {
+					const result = await carrotInstallFromDir({
+						sourcePath,
+						granted: granted as CarrotPermissionGrant,
+					});
+					return { ok: true, id: result.carrot.id, created: result.created };
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			carrotInstallFromUrl: async ({ url, granted, expectedId }) => {
+				try {
+					const result = await carrotInstallFromUrl({
+						url,
+						granted: granted as CarrotPermissionGrant,
+						expectedId,
+					});
+					return { ok: true, id: result.carrot.id, created: result.created };
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			carrotEnable: async ({ id }) => {
+				try {
+					const c = await carrotGetInstalled(id);
+					if (!c) return { ok: false, error: `Carrot ${id} not installed` };
+					await carrotSetEnabled(id, true);
+					await carrotHost.start(id);
+					return { ok: true };
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			carrotDisable: async ({ id }) => {
+				try {
+					await carrotHost.stop(id);
+					await carrotSetEnabled(id, false);
+					return { ok: true };
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			carrotUninstall: async ({ id }) => {
+				try {
+					await carrotHost.stop(id);
+					await carrotUninstall(id);
+					return { ok: true };
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			carrotInvoke: async ({ id, method, params, timeoutMs }) => {
+				try {
+					if (!carrotHost.isRunning(id)) {
+						// Best-effort autostart for already-enabled carrots.
+						const c = await carrotGetInstalled(id);
+						if (c?.enabled) await carrotHost.start(id);
+					}
+					const payload = await carrotHost.invoke(id, method, params, timeoutMs);
+					return { ok: true, payload };
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			localVoiceSetup: async ({ action }) => {
+				const buildCommand = "bun run build:omnivoice";
+				interface LocalVoiceStatus {
+					carrotInstalled: boolean;
+					carrotEnabled: boolean;
+					carrotRunning: boolean;
+					binaryExists: boolean;
+					modelsExist: boolean;
+					bundledCarrotPath?: string;
+					binaryPath?: string;
+					modelPath?: string;
+					codecPath?: string;
+					buildCommand: string;
+				}
+				const collectStatus = async (): Promise<LocalVoiceStatus> => {
+					const installed = await carrotGetInstalled("omnivoice");
+					const baseStatus = {
+						carrotInstalled: Boolean(installed),
+						carrotEnabled: installed?.enabled ?? false,
+						carrotRunning: carrotHost.isRunning("omnivoice"),
+						binaryExists: false,
+						modelsExist: false,
+						bundledCarrotPath: resolveBundledOmnivoiceCarrotPath() ?? undefined,
+						binaryPath: undefined as string | undefined,
+						modelPath: undefined as string | undefined,
+						codecPath: undefined as string | undefined,
+						buildCommand,
+					};
+					if (!installed || !carrotHost.isRunning("omnivoice")) return baseStatus;
+					try {
+						const snap = (await carrotHost.invoke("omnivoice", "status", {}, 5_000)) as {
+							binary: string; model: string; codec: string;
+							binaryExists: boolean; modelsExist: boolean;
+						};
+						return {
+							...baseStatus,
+							binaryExists: snap.binaryExists,
+							modelsExist: snap.modelsExist,
+							binaryPath: snap.binary,
+							modelPath: snap.model,
+							codecPath: snap.codec,
+						};
+					} catch {
+						return baseStatus;
+					}
+				};
+
+				try {
+					if (action === "status") {
+						return { ok: true, status: await collectStatus() };
+					}
+					if (action === "install") {
+						const installed = await carrotGetInstalled("omnivoice");
+						if (!installed) {
+							const sourcePath = resolveBundledOmnivoiceCarrotPath();
+							if (!sourcePath) {
+								return {
+									ok: false,
+									error: "Could not locate the bundled OmniVoice carrot. Run from the weclank repo, or install it manually via Settings → Carrots.",
+								};
+							}
+							const grant: CarrotPermissionGrant = { bun: { read: true, run: true, env: true } };
+							await carrotInstallFromDir({ sourcePath, granted: grant });
+						}
+						const after = await carrotGetInstalled("omnivoice");
+						if (!after?.enabled) {
+							await carrotSetEnabled("omnivoice", true);
+						}
+						if (!carrotHost.isRunning("omnivoice")) {
+							await carrotHost.start("omnivoice");
+						}
+						return { ok: true, status: await collectStatus() };
+					}
+					if (action === "prepare") {
+						if (!carrotHost.isRunning("omnivoice")) {
+							const installed = await carrotGetInstalled("omnivoice");
+							if (!installed) {
+								return { ok: false, error: "Install the OmniVoice carrot first." };
+							}
+							if (!installed.enabled) await carrotSetEnabled("omnivoice", true);
+							await carrotHost.start("omnivoice");
+						}
+						// 30 minute ceiling — 660 MB on a typical home connection
+						// is well under that, but slow links shouldn't get cut
+						// off mid-download.
+						await carrotHost.invoke("omnivoice", "prepare", { force: false }, 30 * 60_000);
+						return { ok: true, status: await collectStatus() };
+					}
+					return { ok: false, error: `Unknown action: ${action as string}` };
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
+			carrotOpenView: async ({ id }) => {
+				try {
+					const c = await carrotGetInstalled(id);
+					if (!c) return { ok: false, error: `Carrot ${id} not installed` };
+					const view = c.manifest.view;
+					if (!view) return { ok: false, error: `Carrot ${id} has no view declared` };
+					const viewPath = join(c.sourcePath, view.relativePath);
+					const url = `file://${viewPath}`;
+					const win = new BrowserWindow<typeof photoBoothRPC>({
+						title: view.title ?? c.manifest.name,
+						url,
+						frame: {
+							width: view.width ?? 480,
+							height: view.height ?? 320,
+							x: 200,
+							y: 200,
+						},
+						rpc: photoBoothRPC,
+						titleBarStyle: view.titleBarStyle ?? "default",
+					});
+					return { ok: true, windowId: win.id };
+				} catch (error) {
+					return { ok: false, error: (error as Error).message };
+				}
+			},
+
 			openUrlInBrowser: async ({ url }) => {
 				try {
 					const cmd =
@@ -1506,6 +1901,105 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 				}
 			},
 
+			openAiCodexOAuthStart: async () => {
+				// Tear down any previous pending session — same singleton as
+				// the OpenRouter flow; only one OAuth dance at a time.
+				if (oauthPending) {
+					try { oauthPending.server.stop(true); } catch { /* noop */ }
+					clearTimeout(oauthPending.timeout);
+					oauthPending = null;
+				}
+				try {
+					// Port 1455 is the only callback registered for OpenAI's
+					// official Codex client_id; we cannot fall back.
+					const port = 1455;
+
+					// PKCE pair via Web Crypto.
+					const verifierBytes = new Uint8Array(new ArrayBuffer(32));
+					crypto.getRandomValues(verifierBytes);
+					const codeVerifier = Buffer.from(verifierBytes).toString("base64url");
+					const hashBuf = await crypto.subtle.digest(
+						"SHA-256",
+						new TextEncoder().encode(codeVerifier),
+					);
+					const codeChallenge = Buffer.from(hashBuf).toString("base64url");
+
+					// Random state for CSRF (we don't strictly validate it
+					// here since the loopback-server boundary already binds
+					// the redirect, but echoing it keeps OpenAI happy).
+					const stateBytes = new Uint8Array(new ArrayBuffer(16));
+					crypto.getRandomValues(stateBytes);
+					const state = Buffer.from(stateBytes).toString("hex");
+
+					const authUrl =
+						`https://auth.openai.com/oauth/authorize` +
+						`?response_type=code` +
+						`&client_id=${encodeURIComponent("app_EMoamEEZ73f0CkXaXp7hrann")}` +
+						`&redirect_uri=${encodeURIComponent(`http://localhost:${port}/auth/callback`)}` +
+						`&scope=${encodeURIComponent("openid profile email offline_access")}` +
+						`&code_challenge=${encodeURIComponent(codeChallenge)}` +
+						`&code_challenge_method=S256` +
+						`&state=${encodeURIComponent(state)}`;
+
+					let resolveCode!: (code: string) => void;
+					const codePromise = new Promise<string>((res) => { resolveCode = res; });
+
+					let server: ReturnType<typeof Bun.serve>;
+					try {
+						server = Bun.serve({
+							port,
+							fetch(req) {
+								const url = new URL(req.url);
+								if (url.pathname === "/auth/callback") {
+									const code = url.searchParams.get("code") ?? "";
+									if (code) resolveCode(code);
+									return new Response(
+										"<html><body style='font:14px system-ui;padding:24px'><h2>Connected to ChatGPT</h2><p>You can close this tab and return to Weclank.</p></body></html>",
+										{ headers: { "Content-Type": "text/html" } },
+									);
+								}
+								return new Response("Not found", { status: 404 });
+							},
+						});
+					} catch (err) {
+						throw new Error(
+							`Could not bind port 1455 (required by OpenAI's Codex client). Close whatever is using it and retry. ${(err as Error).message}`,
+						);
+					}
+
+					const timeout = setTimeout(() => {
+						if (oauthPending?.server === server) {
+							try { server.stop(true); } catch { /* noop */ }
+							oauthPending = null;
+						}
+					}, 5 * 60 * 1000);
+
+					oauthPending = { server, resolve: resolveCode, timeout };
+					(oauthPending as OAuthPending & { codePromise: Promise<string> }).codePromise = codePromise;
+
+					return { authUrl, codeVerifier };
+				} catch (error) {
+					return { authUrl: "", codeVerifier: "", error: (error as Error).message };
+				}
+			},
+
+			openAiCodexOAuthComplete: async () => {
+				if (!oauthPending) return { code: "", done: false, error: "No OAuth session in progress" };
+				try {
+					const pending = oauthPending as OAuthPending & { codePromise: Promise<string> };
+					const code = await Promise.race([
+						pending.codePromise,
+						new Promise<string>((_, rej) => setTimeout(() => rej(new Error("timeout")), 3 * 60 * 1000)),
+					]);
+					clearTimeout(oauthPending.timeout);
+					try { oauthPending.server.stop(true); } catch { /* noop */ }
+					oauthPending = null;
+					return { code, done: true };
+				} catch (error) {
+					return { code: "", done: false, error: (error as Error).message };
+				}
+			},
+
 			stopStreamEgress: async () => {
 				if (!egress) {
 					// Already stopped (maybe ffmpeg crashed) — make sure
@@ -1540,8 +2034,21 @@ const photoBoothRPC: ReturnType<typeof BrowserView.defineRPC<PhotoBoothRPC>> = B
 // Open the SQLite database eagerly so the first RPC isn't slowed by the
 // initial migration. Errors here are fatal — we surface them to the
 // console; the renderer's auth call will fail with a clear error.
-void openDb().then((d) => {
+void openDb().then(async (d) => {
 	console.log("[db] ready at", getDbPath(), "tables:", d.query("SELECT count(*) as n FROM sqlite_master").get());
+	// Hot reload only runs in dev builds; release/canary builds skip the
+	// fs watcher to avoid latency surprises in shipped apps.
+	const channel = Bun.env["NODE_ENV"] === "production" ? "release" : "dev";
+	carrotHost.setChannel(channel);
+	// Start any carrots the user previously enabled. Errors here are
+	// non-fatal — the studio still boots even if a carrot worker fails.
+	try {
+		await carrotHost.startEnabled();
+		const running = carrotHost.listRunning();
+		if (running.length) console.log("[carrots] running:", running.join(", "));
+	} catch (err) {
+		console.warn("[carrots] startEnabled failed:", err);
+	}
 }).catch((err) => {
 	console.error("[db] failed to open:", err);
 });

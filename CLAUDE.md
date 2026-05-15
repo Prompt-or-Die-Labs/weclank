@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Studio Live** — an open-source local-first streaming studio with AI co-hosts. Built on Electrobun (Bun main process + WKWebView/CEF renderer). One binary, no cloud. Source-available scenes, agents, tool calls, RTMP egress, and per-user data — all living in a SQLite file on the user's machine.
+**weclank** — an open-source local-first streaming studio with AI co-hosts. Built on Electrobun (Bun main process + WKWebView/CEF renderer). One binary, no cloud. Source-available scenes, agents, tool calls, RTMP egress, and per-user data — all living in a SQLite file on the user's machine.
 
 The product is a single app — splash → local login → studio. The studio composes scenes from camera/screen/mic/AI participants, fans the broadcast out to one or many RTMP destinations via ffmpeg (with hardware encoding auto-selected), and lets an LLM-driven banter agent drive overlays, music, and captions in response to chat, mic transcription, and a tail of the user's Claude Code / Codex coding session.
 
@@ -22,13 +22,34 @@ Electrobun's bundler handles transpilation — there is no separate `tsc` build 
 
 The green-bar invariant is **`bun check` clean** before any commit.
 
+## Response Style
+
+- Keep responses concise. Long enumerations and findings go to files (`/tmp/<task>.md`), not chat.
+- Skip trailing summaries — the diff and tool output already show what changed.
+
+## Scope Discipline
+
+- Read existing code and architecture (above) before proposing features. Do NOT invent additions outside the documented scope (e.g. cloud sync, remote accounts, password reset, encrypted-at-rest secrets — see "Out of scope" below).
+- When asked to "review" or "audit", write output to `/tmp/<task>-review.md`. Do NOT edit source in place until I approve.
+- If scope is ambiguous, name the assumption and continue with the smallest reasonable interpretation. Don't expand silently.
+
+## Validation Approach
+
+- Validate by RUNNING THE APP — `bun start`, smoke scripts, the actual feature. Don't write extra mocks as a substitute for running real code.
+- Focus on the reported symptom (the runtime error in the log), not adjacent discrepancies (version strings, unrelated lint noise).
+
+## Stop Hook & Blocking Operations
+
+- If an external dependency (CI run, PR merge, auth flow, stop hook) shows the same state across **2 consecutive checks**, STOP polling and surface: current state, why I'm needed, 2–3 options to unblock or pivot.
+- Never silent-wait. Org usage limits, auth failures, and stuck checks are escalation signals, not retry signals.
+
 ## First launch
 
 1. App boots, mounts the splash view, prompts for sign-in or create-account.
 2. Account row + password hash (argon2id, via `Bun.password`) land in SQLite at:
-   - macOS: `~/Library/Application Support/StudioLive/studio.db`
-   - Linux: `~/.config/studio-live/studio.db`
-   - Windows: `%APPDATA%\StudioLive\studio.db`
+   - macOS: `~/Library/Application Support/Weclank/studio.db`
+   - Linux: `~/.config/weclank/studio.db`
+   - Windows: `%APPDATA%\Weclank\studio.db`
 3. On subsequent launches the user is restored from `localStorage["studio.currentUserId"]` (sticky session) and the studio mounts directly.
 4. Existing localStorage state from before SQLite was added is **auto-migrated** into the new account on first login, then cleared.
 
@@ -293,7 +314,7 @@ DOM-needing modules (`stream-overlays`, `tool-executor`, `transcript/feed`) are 
 Same as VS Code / Cursor / every other local-first desktop app:
 - Password hashed with argon2id (`Bun.password`).
 - API keys + RTMP creds stored plaintext in `user_secrets` table.
-- Anyone with read access to the user's `~/Library/Application Support/StudioLive/studio.db` (or equivalent) can read everything in it.
+- Anyone with read access to the user's `~/Library/Application Support/Weclank/studio.db` (or equivalent) can read everything in it.
 - Mitigate with full-disk encryption (FileVault / BitLocker / LUKS) — same threat model as your shell history.
 - "Session" is `localStorage["studio.currentUserId"]`. No session tokens — single user per process.
 

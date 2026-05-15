@@ -25,6 +25,9 @@ import { studio } from "../state/studio-store";
 import { encodeWav } from "./wav-encoder";
 import { transcribeWav, DEFAULT_TRANSCRIBE_MODEL } from "./openrouter-stt";
 import { transcribeWavOpenAI, DEFAULT_OPENAI_TRANSCRIBE_MODEL } from "./openai-stt";
+import { transcribeWavElizaCloud, DEFAULT_ELIZACLOUD_TRANSCRIBE_MODEL } from "./elizacloud-stt";
+
+export type TranscriptionProvider = "openrouter" | "openai" | "elizacloud";
 
 // Worklet quantum is 128 samples → ~2.7ms at 48kHz. We collect a window
 // of these inside the worklet so VAD/RMS work on a useful chunk size
@@ -84,7 +87,7 @@ class MicTranscriber {
 	private silenceFrames = 0;
 
 	private model = DEFAULT_TRANSCRIBE_MODEL;
-	private transcriptionProvider: "openrouter" | "openai" = "openrouter";
+	private transcriptionProvider: TranscriptionProvider = "openrouter";
 	private cumulativeCost = 0;
 	private utterancesThisMinute = 0;
 	private rateLimitWindowStart = Date.now();
@@ -99,17 +102,16 @@ class MicTranscriber {
 	}
 
 	setModel(model: string): void {
-		this.model = model || (this.transcriptionProvider === "openai" ? DEFAULT_OPENAI_TRANSCRIBE_MODEL : DEFAULT_TRANSCRIBE_MODEL);
+		this.model = model || defaultModelFor(this.transcriptionProvider);
 	}
 
-	setTranscription(opts: { provider?: "openrouter" | "openai"; model?: string }): void {
+	setTranscription(opts: { provider?: TranscriptionProvider; model?: string }): void {
 		if (opts.provider) this.transcriptionProvider = opts.provider;
 		if (opts.model?.trim()) {
 			this.model = opts.model.trim();
 			return;
 		}
-		this.model =
-			this.transcriptionProvider === "openai" ? DEFAULT_OPENAI_TRANSCRIBE_MODEL : DEFAULT_TRANSCRIBE_MODEL;
+		this.model = defaultModelFor(this.transcriptionProvider);
 	}
 
 	get isRunning(): boolean {
@@ -242,10 +244,7 @@ class MicTranscriber {
 
 		try {
 			const wav = encodeWav(samples, audioMixer.ctx.sampleRate);
-			const result =
-				this.transcriptionProvider === "openai"
-					? await transcribeWavOpenAI(wav, { model: this.model })
-					: await transcribeWav(wav, { model: this.model });
+			const result = await transcribeForProvider(this.transcriptionProvider, wav, this.model);
 			this.cumulativeCost += result.cost;
 			if (!result.text || result.text.length < 2) return;
 			for (const listener of this.subscribers) {
@@ -254,6 +253,22 @@ class MicTranscriber {
 		} catch (err) {
 			console.warn("[transcribe] failed", err);
 		}
+	}
+}
+
+function defaultModelFor(p: TranscriptionProvider): string {
+	switch (p) {
+		case "openai": return DEFAULT_OPENAI_TRANSCRIBE_MODEL;
+		case "elizacloud": return DEFAULT_ELIZACLOUD_TRANSCRIBE_MODEL;
+		default: return DEFAULT_TRANSCRIBE_MODEL;
+	}
+}
+
+async function transcribeForProvider(p: TranscriptionProvider, wav: ArrayBuffer, model: string): Promise<{ text: string; cost: number }> {
+	switch (p) {
+		case "openai": return transcribeWavOpenAI(wav, { model });
+		case "elizacloud": return transcribeWavElizaCloud(wav, { model });
+		default: return transcribeWav(wav, { model });
 	}
 }
 

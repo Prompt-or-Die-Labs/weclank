@@ -12,9 +12,10 @@ import { bunRpc } from "../rpc";
 import { studio } from "../state/studio-store";
 import { IpcError, StudioError } from "../core/errors";
 import { arrayBufferToBase64 } from "./base64";
-import { startBroadcastCapture, type BroadcastCaptureSession } from "./capture";
+import { broadcastCapture, type CaptureSink } from "./capture";
 
 const CHUNK_INTERVAL_MS = 1_000;
+const EGRESS_SINK_ID = "egress";
 
 export interface EgressTarget {
 	rtmpUrl: string;
@@ -22,7 +23,7 @@ export interface EgressTarget {
 }
 
 class EgressController {
-	private capture: BroadcastCaptureSession | null = null;
+	private attached = false;
 	private writeChain: Promise<void> = Promise.resolve();
 	private shutdownInFlight: Promise<void> | null = null;
 
@@ -30,7 +31,7 @@ class EgressController {
 	 * `tee` muxer fans the same encode out to all of them. */
 	async start(targets: EgressTarget | EgressTarget[]): Promise<void> {
 		if (this.shutdownInFlight) await this.shutdownInFlight;
-		if (this.capture) throw new StudioError("Egress already started", "Stop the current stream before starting a new one.");
+		if (this.attached) throw new StudioError("Egress already started", "Stop the current stream before starting a new one.");
 
 		const destinations = Array.isArray(targets) ? targets : [targets];
 		if (destinations.length === 0) {
@@ -42,21 +43,26 @@ class EgressController {
 			throw new IpcError(begin.error || "Bun rejected the egress start", begin.error || "Couldn't start the local ffmpeg process. Is ffmpeg on PATH?");
 		}
 
+		this.writeChain = Promise.resolve();
+		const sink: CaptureSink = {
+			id: EGRESS_SINK_ID,
+			onChunk: (blob) => {
+				this.writeChain = this.writeChain
+					.then(() => this.shipChunk(blob))
+					.catch((err) => console.warn("[egress] chunk push failed", err));
+			},
+			onStop: async () => {
+				await this.writeChain;
+			},
+		};
+
 		try {
-			this.writeChain = Promise.resolve();
-			this.capture = startBroadcastCapture({
+			await broadcastCapture.attach(sink, {
 				source: streamEngine,
 				quality: studio.state.stream.quality,
 				chunkIntervalMs: CHUNK_INTERVAL_MS,
-				onChunk: (blob) => {
-					this.writeChain = this.writeChain
-						.then(() => this.shipChunk(blob))
-						.catch((err) => console.warn("[egress] chunk push failed", err));
-				},
-				onError: (event) => {
-					console.error("[egress] recorder error", event);
-				},
 			});
+			this.attached = true;
 		} catch (err) {
 			await bunRpc.stopStreamEgress({});
 			throw err;
@@ -65,23 +71,24 @@ class EgressController {
 
 	/** Fire-and-forget. Live=false flips immediately; ffmpeg drains in background. */
 	stop(): void {
-		const capture = this.capture;
-		this.capture = null;
+		if (!this.attached) {
+			studio.setStream({ live: false });
+			return;
+		}
+		this.attached = false;
 		studio.setStream({ live: false });
-		if (!capture) return;
-		const shutdown = this.shutdown(capture).finally(() => {
+		const shutdown = this.shutdown().finally(() => {
 			if (this.shutdownInFlight === shutdown) this.shutdownInFlight = null;
 		});
 		this.shutdownInFlight = shutdown;
 		void shutdown;
 	}
 
-	private async shutdown(capture: BroadcastCaptureSession): Promise<void> {
+	private async shutdown(): Promise<void> {
 		try {
-			await capture.stop();
-			await this.writeChain;
+			await broadcastCapture.detach(EGRESS_SINK_ID);
 		} catch (err) {
-			console.warn("[egress] recorder stop failed", err);
+			console.warn("[egress] capture detach failed", err);
 		}
 		try {
 			await bunRpc.stopStreamEgress({});

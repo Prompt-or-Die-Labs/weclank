@@ -30,6 +30,7 @@ interface Entry {
 class RendererFarm {
 	private rootHost: HTMLElement | null = null;
 	private entries = new Map<string, Entry>();
+	private unsubscribe: (() => void) | null = null;
 
 	/** Mount the hidden host once. Idempotent. */
 	mount(parent: HTMLElement = document.body): void {
@@ -47,6 +48,32 @@ class RendererFarm {
 		host.style.overflow = "hidden";
 		parent.appendChild(host);
 		this.rootHost = host;
+		this.subscribeToParticipantUpdates();
+	}
+
+	/** Watch the store for participant adds / updates and call
+	 * `ensureRenderer` for each. Without this, updates to an existing
+	 * participant (e.g. the host toggling `cameraOff: false` from the
+	 * stage toolbar) never reach the renderer, so `getUserMedia` is
+	 * never invoked and the webcam never turns on.
+	 *
+	 * Removals are handled separately via `participantRuntime.dispose`
+	 * — no diff needed here. */
+	private subscribeToParticipantUpdates(): void {
+		if (this.unsubscribe) return;
+		let prev = studio.state.participants;
+		this.unsubscribe = studio.select(
+			(s) => s.participants,
+			(next) => {
+				for (const participant of Object.values(next)) {
+					if (prev[participant.id] === participant) continue;
+					void this.ensureRenderer(participant).catch((err) => {
+						console.warn("[renderer-farm] ensureRenderer failed", participant.id, err);
+					});
+				}
+				prev = next;
+			},
+		);
 	}
 
 	/** Look up the renderer for a participant. The StreamEngine calls this

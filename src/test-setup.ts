@@ -13,6 +13,18 @@ if (typeof window === "undefined") {
 	GlobalRegistrator.register();
 }
 
+// MediaStream stub — fallback when happy-dom doesn't provide one. When
+// happy-dom IS loaded, its real MediaStream wins and the destination
+// stub below uses `new MediaStream()` so `instanceof MediaStream` checks
+// in audio-mixer pass for TTS provider streams.
+class StubMediaStream {
+	getAudioTracks(): unknown[] { return []; }
+	getTracks(): unknown[] { return []; }
+}
+if (typeof globalThis.MediaStream === "undefined") {
+	(globalThis as unknown as { MediaStream: typeof StubMediaStream }).MediaStream = StubMediaStream;
+}
+
 // AudioContext stub — `audio-mixer.ts` constructs one at module load.
 // Tests that exercise actual audio routing mock more comprehensively in
 // the test file itself (see `tts/streaming-scheduler.test.ts`).
@@ -24,8 +36,10 @@ class StubAudioContext extends StubAudioNode {
 	currentTime = 0;
 	state: "suspended" | "running" | "closed" = "running";
 	destination = new StubAudioNode();
-	createMediaStreamDestination(): { stream: { getAudioTracks(): unknown[] } } & StubAudioNode {
-		return Object.assign(new StubAudioNode(), { stream: { getAudioTracks: () => [] } });
+	createMediaStreamDestination(): { stream: MediaStream } & StubAudioNode {
+		// IMPORTANT: use the real (happy-dom) MediaStream so consumers'
+		// `source instanceof MediaStream` checks in audio-mixer succeed.
+		return Object.assign(new StubAudioNode(), { stream: new MediaStream() });
 	}
 	createMediaStreamSource(): StubAudioNode { return new StubAudioNode(); }
 	createGain(): StubAudioNode & { gain: { value: number } } {
@@ -72,12 +86,3 @@ if (!(window as unknown as { __electrobun?: ElectrobunStub }).__electrobun) {
 	};
 }
 
-// MediaStream stub — referenced as a type at runtime in audio-mixer's
-// instanceof check.
-class StubMediaStream {
-	getAudioTracks(): unknown[] { return []; }
-	getTracks(): unknown[] { return []; }
-}
-if (typeof globalThis.MediaStream === "undefined") {
-	(globalThis as unknown as { MediaStream: typeof StubMediaStream }).MediaStream = StubMediaStream;
-}

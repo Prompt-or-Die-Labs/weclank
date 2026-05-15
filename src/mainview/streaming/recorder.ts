@@ -15,20 +15,19 @@ import { bunRpc } from "../rpc";
 import { AudioError, IpcError, userMessageFor } from "../core/errors";
 import { toast } from "../components/overlays";
 import { arrayBufferToBase64 } from "./base64";
-import { startBroadcastCapture, type BroadcastCaptureSession } from "./capture";
+import { broadcastCapture, type CaptureSink } from "./capture";
 import { recordingDateName } from "../../shared/recording-names";
 import type { Participant } from "../core/types";
 
 const RECORDER_CHUNK_INTERVAL_MS = 1_000;
 const RECORDER_STOP_TIMEOUT_MS = 45_000;
 const RECORDER_FINISH_TIMEOUT_MS = 120_000;
-const RECORDER_FINAL_CHUNK_GRACE_MS = 750;
+const RECORDER_SINK_ID = "recorder";
 
 interface RecorderSession {
-	capture: BroadcastCaptureSession;
+	sinkId: string;
 	writeChain: Promise<void>;
 	chunkError: Error | null;
-	acceptingChunks: boolean;
 	bytesWritten: number;
 }
 
@@ -92,30 +91,38 @@ class LocalRecorder {
 			}
 			diskSessionOpen = true;
 
-			let session: RecorderSession | null = null;
+			const session: RecorderSession = {
+				sinkId: RECORDER_SINK_ID,
+				writeChain: Promise.resolve(),
+				chunkError: null,
+				bytesWritten: 0,
+			};
+			const sink: CaptureSink = {
+				id: session.sinkId,
+				onChunk: (blob) => {
+					session.writeChain = session.writeChain
+						.then(() => this.shipChunk(blob))
+						.then((bytes) => {
+							session.bytesWritten += bytes;
+						})
+						.catch((err) => {
+							session.chunkError = err instanceof Error ? err : new Error(String(err));
+						});
+				},
+				onStop: async () => {
+					// Detach awaits this AFTER MediaRecorder has flushed its
+					// final dataavailable, so all chunks are queued. Drain
+					// the write chain so finalize sees the final byte count.
+					await session.writeChain;
+				},
+			};
+
 			this.startedAt = Date.now();
-			const capture = startBroadcastCapture({
+			await broadcastCapture.attach(sink, {
 				source: streamEngine,
 				quality: studio.state.stream.quality,
 				chunkIntervalMs: RECORDER_CHUNK_INTERVAL_MS,
-				onChunk: (blob) => {
-					if (!session?.acceptingChunks) return;
-					const activeSession = session;
-					activeSession.writeChain = activeSession.writeChain
-						.then(() => this.shipChunk(blob))
-						.then((bytes) => {
-							activeSession.bytesWritten += bytes;
-						})
-						.catch((err) => {
-							activeSession.chunkError = err instanceof Error ? err : new Error(String(err));
-						});
-				},
-				onError: (event) => {
-					console.error("[recorder] error", event);
-					toast("Recording error — see console", "error");
-				},
 			});
-			session = { capture, writeChain: Promise.resolve(), chunkError: null, acceptingChunks: true, bytesWritten: 0 };
 			this.session = session;
 			studio.setStream({ recording: true });
 			return true;
@@ -154,11 +161,14 @@ class LocalRecorder {
 	private async finalize(session: RecorderSession): Promise<void> {
 		let savedPath: string | null = null;
 		try {
-			await promiseWithTimeout(session.capture.stop(), RECORDER_STOP_TIMEOUT_MS, "MediaRecorder stop");
-			await this.drainChunkWrites(session);
-			await new Promise((resolve) => setTimeout(resolve, RECORDER_FINAL_CHUNK_GRACE_MS));
-			await this.drainChunkWrites(session);
-			session.acceptingChunks = false;
+			// Detach drains MediaRecorder AND the sink's onStop (which awaits
+			// the write chain), so by the time this resolves all chunks have
+			// been shipped to Bun.
+			await promiseWithTimeout(
+				broadcastCapture.detach(session.sinkId),
+				RECORDER_STOP_TIMEOUT_MS,
+				"MediaRecorder stop",
+			);
 			if (session.chunkError) throw session.chunkError;
 			if (session.bytesWritten === 0) {
 				throw new AudioError(
@@ -186,24 +196,11 @@ class LocalRecorder {
 			toast(`Save failed: ${userMessageFor(err)}`, "error");
 			await bunRpc.cancelRecordingFile({}).catch(() => {});
 		} finally {
-			session.acceptingChunks = false;
 			if (savedPath) {
 				const { openRecordingReviewDialog } = await import("../components/recording-review-dialog");
 				openRecordingReviewDialog(savedPath, { saved: true });
 			}
 		}
-	}
-
-	private async drainChunkWrites(session: RecorderSession): Promise<void> {
-		for (let i = 0; i < 3; i++) {
-			const pending = session.writeChain;
-			await pending;
-			if (session.chunkError) throw session.chunkError;
-			await new Promise((resolve) => setTimeout(resolve, 0));
-			if (session.writeChain === pending) return;
-		}
-		await session.writeChain;
-		if (session.chunkError) throw session.chunkError;
 	}
 
 	private async shipChunk(blob: Blob): Promise<number> {
@@ -244,7 +241,7 @@ function hasRecordableSource(): boolean {
 function participantHasRecordableVideo(participant: Participant): boolean {
 	switch (participant.kind) {
 		case "screen":
-			return true;
+			return Boolean(participant.mediaStream);
 		case "camera":
 			return !participant.cameraOff;
 		case "voice":

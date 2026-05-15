@@ -1,4 +1,4 @@
-// Chat tab — unified multi-platform chat panel.
+// Chat tab — unified multi-platform chat panel + local composer.
 //
 // Reads from ChatBus (one shared message stream across Twitch, Kick, and
 // — once OAuth lands — YouTube). Each row shows a platform glyph badge,
@@ -6,6 +6,12 @@
 //   - Pin → lower-third overlay on broadcast
 //   - Mod → opens a delete/timeout/ban menu (only for platforms whose
 //     connector supports moderation, i.e. Twitch with OAuth saved)
+//
+// Composer: a text input at the bottom of the panel lets the host send
+// a synthetic chat message into every running agent's banter loop via
+// banterEngine.broadcast(). Useful for testing agents without going live
+// or for steering them mid-show. Sent rows are tagged `[me]` and appear
+// inline so the host sees their own send alongside viewer chat.
 //
 // Connection panel: one input per platform (Twitch, Kick, YouTube). Each
 // has its own connect button. The bus reconciles independently per
@@ -27,7 +33,7 @@ import type { ChatOverlayConfig, ChatPlatformId } from "../../core/types";
 import { userMessageFor } from "../../core/errors";
 
 interface ChatRow {
-	kind: "viewer" | "agent";
+	kind: "viewer" | "agent" | "self";
 	author: string;
 	text: string;
 	timestamp: number;
@@ -97,6 +103,10 @@ export class ChatTab extends Component<State> {
 					? `<div class="tab-chat__empty">${placeholder}</div>`
 					: this.state.messages.slice(-100).reverse().map((m) => this.renderRow(m)).join("")}
 			</div>
+			<form class="tab-chat__composer" data-composer>
+				<input type="text" class="tab-chat__composer-input" data-composer-input placeholder="Talk to the agents…" autocomplete="off" />
+				<button type="submit" class="tab-chat__composer-send" data-composer-send>Send</button>
+			</form>
 		`;
 	}
 
@@ -136,12 +146,22 @@ export class ChatTab extends Component<State> {
 	}
 
 	private renderRow(msg: ChatRow): string {
-		const id = `${msg.platform ?? "agent"}:${msg.messageId ?? `${msg.author}:${msg.timestamp}`}`;
+		const id = `${msg.platform ?? msg.kind}:${msg.messageId ?? `${msg.author}:${msg.timestamp}`}`;
 		if (msg.kind === "agent") {
 			return `
 				<div class="tab-chat__row tab-chat__row--agent" data-msg="${escapeHtml(id)}">
 					<div class="tab-chat__msg">
 						<span class="tab-chat__author tab-chat__author--agent">${escapeHtml(msg.author)}</span>
+						<span class="tab-chat__body">${escapeHtml(msg.text)}</span>
+					</div>
+				</div>
+			`;
+		}
+		if (msg.kind === "self") {
+			return `
+				<div class="tab-chat__row tab-chat__row--self" data-msg="${escapeHtml(id)}">
+					<div class="tab-chat__msg">
+						<span class="tab-chat__author tab-chat__author--self">${escapeHtml(msg.author)}</span>
 						<span class="tab-chat__body">${escapeHtml(msg.text)}</span>
 					</div>
 				</div>
@@ -217,8 +237,43 @@ export class ChatTab extends Component<State> {
 				this.openModMenu(id, e.currentTarget as HTMLElement);
 			});
 		}
+		const composer = this.$<HTMLFormElement>("[data-composer]");
+		if (composer) {
+			this.on(composer, "submit", (e) => {
+				e.preventDefault();
+				this.sendComposerMessage();
+			});
+		}
+
 		const list = this.$<HTMLElement>("[data-list]");
 		if (list) list.scrollTop = list.scrollHeight;
+	}
+
+	private sendComposerMessage(): void {
+		const input = this.$<HTMLInputElement>("[data-composer-input]");
+		if (!input) return;
+		const text = input.value.trim();
+		if (!text) {
+			input.focus();
+			return;
+		}
+		const now = Date.now();
+		const row: ChatRow = {
+			kind: "self",
+			author: "[me]",
+			text,
+			timestamp: now,
+		};
+		banterEngine.broadcast({
+			author: "[me]",
+			text,
+			timestamp: now,
+			meta: { source: "user-chat" },
+		});
+		const msgs = [...this.state.messages, row].slice(-200);
+		this.setState({ messages: msgs });
+		input.value = "";
+		this.$<HTMLInputElement>("[data-composer-input]")?.focus();
 	}
 
 	protected afterMount(): void {

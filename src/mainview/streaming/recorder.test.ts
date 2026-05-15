@@ -123,6 +123,7 @@ beforeAll(() => {
 				muted: false,
 				cameraOff: false,
 				isAgent: false,
+				mediaStream: kind === "screen" || kind === "camera" ? new MediaStream() : undefined,
 			});
 			studio.addSource(studio.activeScene.id, id);
 			return id;
@@ -151,6 +152,10 @@ beforeEach(async () => {
 	finishResult = { success: false, reason: "canceled" };
 	const { studio } = await import("../state/studio-store");
 	studio.installRestored({});
+	// Reset the broadcastCapture singleton between tests so each test
+	// gets a fresh MediaRecorder built from the currently-installed fake.
+	const { broadcastCapture } = await import("./capture");
+	broadcastCapture._resetForTesting();
 });
 
 afterEach(() => {
@@ -227,6 +232,31 @@ describe("localRecorder", () => {
 		expect(lastSuggestedName).toBe("screen proof.mp4");
 		expect(screenSource).toMatchObject({ x: 0, y: 0, w: 1, h: 1, visible: true });
 		expect(localRecorder.isRecording).toBe(false);
+	});
+
+	test("ignores restored screen sources without a live media stream", async () => {
+		const { studio } = await import("../state/studio-store");
+		const staleId = participantId("restored-screen") as ParticipantId;
+		studio.addParticipant({
+			id: staleId,
+			displayName: "Restored screen",
+			kind: "screen",
+			muted: false,
+			cameraOff: false,
+			isAgent: false,
+		});
+		studio.addSource(studio.activeScene.id, staleId);
+		const { localRecorder } = await import("./recorder");
+
+		const start = localRecorder.start();
+		await chooseRecordingSource("screen");
+		await submitRecordingName("fresh screen");
+		const started = await start;
+
+		expect(started).toBe(false);
+		expect(sourceCreateCalls).toBe(1);
+		expect(lastSourceKind).toBe("screen");
+		expect(lastSuggestedName).toBe("fresh screen.mp4");
 	});
 
 	test("writes the final chunk before finishing the recording file", async () => {

@@ -1,0 +1,19 @@
+{
+	"id": "omnivoice",
+	"name": "OmniVoice (local TTS)",
+	"version": "0.1.0",
+	"description": "On-device TTS via llama-omnivoice-server. No API key, no network calls at runtime. Auto-downloads the Q4_K_M GGUF model the first time you synthesize.",
+	"long_description": "Runs the OmniVoice GGUF model (Q4_K_M for the tightest memory footprint while you're streaming) under Weclank's own ~/.weclank/local-inference tree. First call downloads ~660MB of model weights from huggingface.co/Serveurperso/OmniVoice-GGUF; the llama-omnivoice-server binary is built locally via `bun run build:omnivoice` (clones ServeurpersoCom/omnivoice.cpp and cmake-builds with Metal/CUDA/CPU auto-detection). Subsequent calls are a sub-second LM forward pass on the GPU backend plus codec decode.",
+	"permissions": {
+		"bun": {
+			"read": true,
+			"run": true,
+			"env": true
+		},
+		"isolation": "subprocess"
+	},
+	"worker": {
+		"relativePath": "worker.mjs"
+	},
+	"homepage": "https://huggingface.co/Serveurperso/OmniVoice-GGUF"
+}

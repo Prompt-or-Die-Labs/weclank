@@ -31,15 +31,40 @@ beforeAll(() => {
 			dispose: () => {},
 		},
 	}));
-	mock.module("../streaming/audio-mixer", () => ({
-		audioMixer: { removeInput: () => {} },
-	}));
+	// Stub the full audio-mixer surface — modules transitively imported
+	// by later tests (TTS providers via streaming-provider.ts) read
+	// `audioMixer.ctx`, so a minimal stub here would null-pointer them.
+	mock.module("../streaming/audio-mixer", () => {
+		const ctx = new AudioContext();
+		return {
+			audioMixer: {
+				ctx,
+				removeInput: () => {},
+				addInput: () => null,
+				getAnalyser: () => undefined,
+				hasChannel: () => false,
+				resume: async () => {},
+			},
+		};
+	});
 	mock.module("../tts/config-dialog", () => ({
 		pickTTSConfig: async () => null,
 	}));
-	mock.module("../tts/voice-route", () => ({
+	// Stub the full registry surface — bun's `mock.module` mutates the
+	// module process-wide and there is no restore for module mocks, so
+	// any test that runs later and imports a different named export from
+	// `tts/registry` would otherwise hit a "Export not found" error at
+	// link time.
+	mock.module("../tts/registry", () => ({
 		disposeVoiceRoute: () => {},
-		initVoiceRoute: () => ({ stream: new MediaStream() }),
+		initVoiceRoute: () => ({ provider: null, stream: new MediaStream() }),
+		createTTSProvider: () => null,
+		disposeTTSProvider: () => {},
+		ensureVoiceRoute: () => null,
+		getTTSProvider: () => undefined,
+		getStoredApiKey: () => "",
+		setStoredApiKey: async () => {},
+		speakWithVoiceRoute: async () => {},
 	}));
 	mock.module("../banter/assistant-config-dialog", () => ({
 		pickAssistantConfig: async () => null,

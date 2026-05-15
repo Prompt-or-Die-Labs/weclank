@@ -46,7 +46,7 @@ describe("ApiError friendly messages", () => {
 	});
 
 	test("429 says rate-limited", () => {
-		const err = new ApiError(429, "Suno", "Too Many");
+		const err = new ApiError(429, "ElevenLabs", "Too Many");
 		expect(err.userMessage).toMatch(/rate-limiting/);
 	});
 
@@ -61,8 +61,8 @@ describe("ApiError friendly messages", () => {
 
 	test("trims long bodies in .message but keeps the HTTP signature", () => {
 		const body = "x".repeat(500);
-		const err = new ApiError(500, "Suno", body);
-		expect(err.message).toContain("Suno HTTP 500");
+		const err = new ApiError(500, "ElevenLabs", body);
+		expect(err.message).toContain("ElevenLabs HTTP 500");
 		// Stored body trimmed to 200 chars.
 		expect(err.body.length).toBe(200);
 	});

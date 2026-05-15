@@ -21,15 +21,16 @@
 //     instrumenting the executor call site inside runToolLoop.
 
 import { anyHumanSpeaking } from "./vad";
-import { LLMClient, type ChatTurn } from "./llm-client";
+import { LLMClient, type ChatTurn, type LLMResponse } from "./llm-client";
 import type { ChatMessage } from "./chat-source";
 import { chatBus } from "../chat/chat-bus";
-import { runAgentToolLoop, type AgentToolCallRecord } from "./agent-turn";
+import { BANTER_TOOLS } from "./tools";
+import { executeToolCalls, type ToolCall, type ToolExecutionPolicy } from "./tool-executor";
 import { runtimeAutonomy, runtimeToolPermissions } from "./tool-policy";
 import { studio } from "../state/studio-store";
 import { transcriptFeed } from "../transcript/feed";
 import { micTranscriber } from "../transcription/mic-transcriber";
-import { ensureVoiceRoute } from "../tts/voice-route";
+import { ensureVoiceRoute } from "../tts/registry";
 import { userMessageFor } from "../core/errors";
 import { setAiDegradedMessage } from "../studio-health";
 import type { ParticipantId } from "../core/ids";
@@ -54,7 +55,13 @@ export interface AgentReply {
 }
 
 /** One entry in the rolling tool-call log. */
-export type ToolCallRecord = AgentToolCallRecord;
+export interface ToolCallRecord {
+	ts: number;
+	name: string;
+	args: Record<string, unknown>;
+	ok: boolean;
+	error?: string;
+}
 
 const TOOL_LOG_CAP = 20;
 
@@ -299,7 +306,7 @@ class BanterSession {
 	 * `stop()` aborts mid-respond instead of letting tokens keep flying. */
 	private async runToolLoop(systemContent: string, history: ChatTurn[]): Promise<string> {
 		const participant = studio.state.participants[this.participantId];
-		return runAgentToolLoop({
+		return runToolLoop({
 			llm: this.llm,
 			systemContent,
 			history,
@@ -557,3 +564,85 @@ export const DEFAULT_BANTER_MODEL = "openrouter/free";
  * (Chat Completions + tools); older Codex snapshots such as `gpt-5.1-codex-max`
  * are marked deprecated — see https://developers.openai.com/api/docs/models/gpt-5.3-codex */
 export const DEFAULT_OPENAI_BANTER_MODEL = "gpt-5.3-codex";
+
+/** Eliza Cloud default chat model. Their cloud proxies multiple upstreams;
+ * `gpt-4o-mini` is documented as the small/fast tier in their model catalog. */
+export const DEFAULT_ELIZACLOUD_BANTER_MODEL = "gpt-4o-mini";
+
+// ── One agent turn ────────────────────────────────────────────────────
+// Was previously its own `./agent-turn.ts` module — folded back in
+// because it had exactly one caller (`BanterSession.runToolLoop`). The
+// seam was hypothetical: there's no second adapter for "running an
+// agent turn," so the indirection wasn't earning depth.
+
+/** Run the LLM with tool-calling enabled. Loops up to 4 times: tool
+ * call → execute → feed results back → next turn. Returns the first
+ * speakable text response. */
+async function runToolLoop(args: {
+	llm: Pick<LLMClient, "respond">;
+	systemContent: string;
+	history: ChatTurn[];
+	signal: AbortSignal;
+	policy?: ToolExecutionPolicy;
+	onTextReady(): void;
+	onToolCall(record: ToolCallRecord): void;
+}): Promise<string> {
+	let messages: ChatTurn[] = [{ role: "system", content: args.systemContent }, ...args.history];
+	for (let iter = 0; iter < 4; iter++) {
+		if (args.signal.aborted) return "";
+		const result: LLMResponse = await args.llm.respond(messages, BANTER_TOOLS, args.signal);
+		if (args.signal.aborted) return "";
+		if (result.toolCalls.length === 0) {
+			if (result.text) args.onTextReady();
+			return result.text;
+		}
+		messages = [
+			...messages,
+			{
+				role: "assistant",
+				content: result.text ?? "",
+				tool_calls: result.toolCalls.map((call) => ({
+					id: call.id,
+					type: "function" as const,
+					function: { name: call.name, arguments: JSON.stringify(call.args) },
+				})),
+			},
+		];
+		const calls: ToolCall[] = result.toolCalls.map((call) => ({
+			id: call.id,
+			name: call.name,
+			args: call.args,
+		}));
+		const toolResults = await executeToolCalls(calls, args.policy);
+		for (let i = 0; i < calls.length; i++) {
+			const call = calls[i]!;
+			const output = toolResults[i];
+			const parsed = parseToolOutput(output?.output ?? "");
+			args.onToolCall({
+				ts: Date.now(),
+				name: call.name,
+				args: call.args,
+				ok: !parsed.error,
+				error: parsed.error?.slice(0, 120),
+			});
+		}
+		for (const result of toolResults) {
+			messages.push({ role: "tool", tool_call_id: result.tool_call_id, content: result.output });
+		}
+	}
+	return "";
+}
+
+function parseToolOutput(raw: string): { error?: string } {
+	if (!raw) return {};
+	try {
+		const value = JSON.parse(raw) as Record<string, unknown>;
+		if (value && typeof value === "object" && "error" in value) {
+			const error = value["error"];
+			return { error: typeof error === "string" ? error : "tool error" };
+		}
+		return {};
+	} catch {
+		return {};
+	}
+}

@@ -8,9 +8,9 @@
 import { studio } from "./studio-store";
 import { bunRpc } from "../rpc";
 import { toast } from "../components/overlays";
-import { audioMixer } from "../streaming/audio-mixer";
 import { pickTTSConfig } from "../tts/config-dialog";
-import { disposeVoiceRoute, initVoiceRoute } from "../tts/voice-route";
+import { initVoiceRoute } from "../tts/registry";
+import { participantRuntime } from "./participant-runtime";
 import { pickAssistantConfig } from "../banter/assistant-config-dialog";
 import { pickInputDevice } from "./device-picker";
 import { banterEngine } from "../banter/banter-engine";
@@ -183,8 +183,8 @@ export async function createParticipantFromKind(
 				assistantRole,
 				banter: setup.banterConfig,
 			};
-			const textCleanup = (): void => { banterEngine.stop(id); };
-			studio.addParticipant(textParticipant, textCleanup);
+			participantRuntime.attach(id, { hasBanterSession: true });
+			studio.addParticipant(textParticipant, () => void participantRuntime.dispose(id));
 			// Text agents don't go onto the canvas — no rendererFarm, no addSource.
 			if (setup.banterConfig.enabled) {
 				const started = banterEngine.start(id, setup.banterConfig);
@@ -243,28 +243,18 @@ export async function createParticipantFromKind(
 		assistantRole,
 	};
 
-	// Cleanup: revoke Blob URLs, dispose the TTS provider, stop media
-	// stream tracks, remove the audio mixer channel. Runs when
-	// removeParticipant is called for any reason — explicit delete, scene
-	// wipe, app teardown.
-	const cleanup = (): void => {
-		if (visual?.modelUrl?.startsWith("blob:")) {
-			URL.revokeObjectURL(visual.modelUrl);
-		}
-		if (isAgent) {
-			banterEngine.stop(id);
-			disposeVoiceRoute(id);
-		} else {
-			audioMixer.removeInput(id);
-		}
-		mediaStream?.getTracks().forEach((t) => t.stop());
-		// Tear down the offscreen renderer too. Dynamic import so this
-		// module doesn't pull the renderer-farm graph into Bun-side
-		// tests that import source-factory transitively.
-		void import("../components/renderer-farm").then(({ rendererFarm }) => rendererFarm.dispose(id));
-	};
-
-	studio.addParticipant(participant, cleanup);
+	// Lifecycle: record what was attached so participantRuntime knows
+	// how to tear it down. The studio store's cleanup callback is a thin
+	// shim over `participantRuntime.dispose(id)`.
+	participantRuntime.attach(id, {
+		mediaStream,
+		blobModelUrl: visual?.modelUrl?.startsWith("blob:") ? visual.modelUrl : undefined,
+		hasVoiceRoute: isAgent,
+		hasMixerInput: !isAgent,
+		hasBanterSession: isAgent,
+		hasRenderer: true,
+	});
+	studio.addParticipant(participant, () => void participantRuntime.dispose(id));
 
 	// Renderer lives in the offscreen farm; create it now so frames are
 	// ready when the StreamEngine composites this source.
@@ -322,13 +312,12 @@ export async function addVoiceImageFromLibraryPath(
 		audioStream,
 	};
 
-	const cleanup = (): void => {
-		banterEngine.stop(id);
-		disposeVoiceRoute(id);
-		void import("../components/renderer-farm").then(({ rendererFarm }) => rendererFarm.dispose(id));
-	};
-
-	studio.addParticipant(participant, cleanup);
+	participantRuntime.attach(id, {
+		hasVoiceRoute: true,
+		hasBanterSession: true,
+		hasRenderer: true,
+	});
+	studio.addParticipant(participant, () => void participantRuntime.dispose(id));
 	const { rendererFarm } = await import("../components/renderer-farm");
 	try {
 		await rendererFarm.ensureRenderer(participant);

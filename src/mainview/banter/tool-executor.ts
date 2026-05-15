@@ -330,11 +330,12 @@ function doShowOverlay(args: ShowOverlayArgs): { id: OverlayId; kind: string; ex
 	};
 }
 
-// Suno renders take 30-120s; awaiting in the tool loop would stall the
-// agent's whole respond cycle. Instead we kick generation into the
-// background and return immediately so the LLM can voice an expectation-
-// setting line ("ok, queueing up some lo-fi — it'll fade in shortly").
-// When the track is ready, we swap it in and surface a toast.
+// ElevenLabs music renders in seconds for short clips but can still
+// take 10s+ for longer pieces. Awaiting in the tool loop would stall the
+// agent's whole respond cycle, so we kick generation into the background
+// and return immediately. The LLM can voice an expectation-setting line
+// ("ok, queueing up some lo-fi — it'll fade in shortly") while we wait,
+// then the track crossfades in when ready.
 function doPlayMusic(args: PlayMusicArgs): { status: "queued"; message: string } {
 	const { prompt } = args;
 	if (!prompt) throw new ToolInvocationError("play_music requires a prompt");
@@ -363,6 +364,6 @@ function doPlayMusic(args: PlayMusicArgs): { status: "queued"; message: string }
 	return {
 		status: "queued",
 		message:
-			"Music generation queued — typically 30–120 seconds. The track will crossfade in automatically when ready. Briefly tell the audience what's coming so the wait doesn't feel like dead air.",
+			"Music generation queued via ElevenLabs — usually ready in 10–30 seconds. The track will crossfade in automatically. Briefly tell the audience what's coming so the wait doesn't feel like dead air.",
 	};
 }

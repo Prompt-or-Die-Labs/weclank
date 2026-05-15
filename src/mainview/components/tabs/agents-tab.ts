@@ -17,7 +17,7 @@ import { banterEngine, type BanterPhase, type ToolCallRecord } from "../../bante
 import { runtimeAutonomy, runtimeToolPermissions } from "../../banter/tool-policy";
 import { pickBanterConfig } from "../../banter/config-dialog";
 import { pickTTSConfig } from "../../tts/config-dialog";
-import { initVoiceRoute, speakWithVoiceRoute } from "../../tts/voice-route";
+import { initVoiceRoute, speakWithVoiceRoute } from "../../tts/registry";
 import { createParticipantFromKind } from "../../state/source-factory";
 import { pickAssistantConfig, ASSISTANT_ROLES } from "../../banter/assistant-config-dialog";
 import { Popover, toast } from "../overlays";

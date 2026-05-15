@@ -1,5 +1,5 @@
 // Music tab — current track + volume + button to open the full music
-// generator dialog (Suno).
+// generator dialog (ElevenLabs).
 
 import { Component } from "../../core/component";
 import { studio } from "../../state/studio-store";

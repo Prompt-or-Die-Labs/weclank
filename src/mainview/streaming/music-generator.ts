@@ -1,22 +1,30 @@
-// Thin adapter over the Suno API for music generation. Reuses the user's
-// stored Suno API key from the TTS storage so they don't enter it twice.
-// Returns the raw audio bytes; MusicPlayer handles routing/playback.
+// Thin adapter over the ElevenLabs music API. Reuses the user's stored
+// ElevenLabs API key (same key as the TTS provider) so they don't enter
+// it twice. Returns a synthetic { audioUrl, title, taskId } shape so
+// MusicPlayer + the agent tools don't need to change.
+//
+// Endpoint: POST https://api.elevenlabs.io/v1/music
+// Auth: xi-api-key header
+// Returns: binary audio bytes (default mp3_44100_128).
+//
+// Music API requires a paid ElevenLabs plan; a 401/403 surfaces a
+// friendly "API key rejected" toast via the shared ApiError path.
 
 import { getStoredApiKey } from "../tts/registry";
 import { ApiError, ConfigError } from "../core/errors";
 
-const DEFAULT_BASE_URL = "https://api.sunoapi.org";
-const DEFAULT_MODEL = "V5_5";
-const CALLBACK_PLACEHOLDER = "https://studio.local/suno-callback";
-const POLL_INTERVAL_MS = 3_000;
-const POLL_TIMEOUT_MS = 5 * 60_000;
+const ENDPOINT = "https://api.elevenlabs.io/v1/music";
+const DEFAULT_MODEL = "music_v1";
+const DEFAULT_FORMAT = "mp3_44100_128";
+const DEFAULT_LENGTH_MS = 30_000;
 
 export interface MusicGenerationOptions {
 	prompt: string;
 	style?: string;
 	instrumental?: boolean;
 	model?: string;
-	baseUrl?: string;
+	/** Override the generated track length in milliseconds (3000–600000). */
+	musicLengthMs?: number;
 	apiKey?: string;
 }
 
@@ -26,91 +34,55 @@ export interface MusicGenerationResult {
 	taskId: string;
 }
 
-interface SubmitResponse {
-	code?: number;
-	msg?: string;
-	data?: { taskId?: string };
-}
-
-interface StatusItem {
-	audioUrl?: string;
-	streamAudioUrl?: string;
-	title?: string;
-	status?: string;
-}
-
-interface StatusResponse {
-	code?: number;
-	msg?: string;
-	data?: {
-		status?: string;
-		response?: { sunoData?: StatusItem[] };
-		clips?: StatusItem[];
-		audioUrl?: string;
-	};
-}
-
 export async function generateMusic(opts: MusicGenerationOptions): Promise<MusicGenerationResult> {
-	const apiKey = opts.apiKey || getStoredApiKey("suno");
+	const apiKey = opts.apiKey || getStoredApiKey("elevenlabs");
 	if (!apiKey) {
 		throw new ConfigError(
-			"No Suno API key",
-			"Set a Suno API key in any agent's Voice settings → Suno provider before generating music.",
+			"No ElevenLabs API key",
+			"Save your ElevenLabs API key in any agent's Voice settings before generating music.",
 		);
 	}
-	const baseUrl = (opts.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
-	const model = opts.model || DEFAULT_MODEL;
-	const headers = {
-		Authorization: `Bearer ${apiKey}`,
-		"Content-Type": "application/json",
-		Accept: "application/json",
-	};
+
+	// ElevenLabs music takes a single text prompt — fold style hints in.
+	const composed = opts.style ? `${opts.prompt}. Style: ${opts.style}` : opts.prompt;
+	const prompt = opts.instrumental === false ? composed : `${composed}. Instrumental, no vocals.`;
 
 	const body: Record<string, unknown> = {
-		customMode: opts.style != null,
-		instrumental: opts.instrumental ?? true, // instrumental is the
-		// default for stream BG — vocals fight the agent's voice.
-		prompt: opts.prompt,
-		model,
-		callBackUrl: CALLBACK_PLACEHOLDER,
+		prompt,
+		music_length_ms: clampLength(opts.musicLengthMs ?? DEFAULT_LENGTH_MS),
+		output_format: DEFAULT_FORMAT,
+		model_id: opts.model ?? DEFAULT_MODEL,
+		force_instrumental: opts.instrumental !== false,
 	};
-	if (opts.style) {
-		body["style"] = opts.style;
-		body["title"] = opts.prompt.slice(0, 60);
-	}
 
-	const submitRes = await fetch(`${baseUrl}/api/v1/generate`, {
+	const response = await fetch(ENDPOINT, {
 		method: "POST",
-		headers,
+		headers: {
+			"xi-api-key": apiKey,
+			"Content-Type": "application/json",
+			Accept: "audio/mpeg",
+		},
 		body: JSON.stringify(body),
 	});
-	if (!submitRes.ok) {
-		throw new ApiError(submitRes.status, "Suno", await submitRes.text());
+	if (!response.ok) {
+		throw new ApiError(response.status, "ElevenLabs", await safeText(response));
 	}
-	const submitted = (await submitRes.json()) as SubmitResponse;
-	const taskId = submitted.data?.taskId;
-	if (!taskId) throw new ApiError(0, "Suno", `submit returned no taskId (${submitted.msg ?? "no msg"})`);
+	const bytes = await response.arrayBuffer();
+	const songId = response.headers.get("song_id") ?? response.headers.get("Song-Id");
+	const taskId = songId || `el-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+	const audioUrl = URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
+	return {
+		audioUrl,
+		title: opts.prompt.slice(0, 80),
+		taskId,
+	};
+}
 
-	const deadline = Date.now() + POLL_TIMEOUT_MS;
-	while (Date.now() < deadline) {
-		await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-		const url = `${baseUrl}/api/v1/generate/record-info?taskId=${encodeURIComponent(taskId)}`;
-		const res = await fetch(url, { headers });
-		if (!res.ok) continue;
-		const parsed = (await res.json()) as StatusResponse;
-		const status = (parsed.data?.status ?? "").toUpperCase();
-		const item = parsed.data?.response?.sunoData?.[0] ?? parsed.data?.clips?.[0];
-		const audioUrl = item?.audioUrl ?? item?.streamAudioUrl ?? parsed.data?.audioUrl;
-		if ((status === "SUCCESS" || status === "COMPLETE" || status === "FIRST_SUCCESS") && audioUrl) {
-			return {
-				audioUrl,
-				title: item?.title ?? opts.prompt.slice(0, 80),
-				taskId,
-			};
-		}
-		if (status === "FAILED" || status === "ERROR") {
-			throw new ApiError(0, "Suno", `generation failed: ${parsed.msg ?? "unknown"}`);
-		}
-	}
-	throw new ApiError(0, "Suno", "generation timed out after 5 minutes");
+function clampLength(ms: number): number {
+	if (!Number.isFinite(ms)) return DEFAULT_LENGTH_MS;
+	return Math.max(3_000, Math.min(600_000, Math.round(ms)));
+}
+
+async function safeText(response: Response): Promise<string> {
+	try { return await response.text(); } catch { return ""; }
 }

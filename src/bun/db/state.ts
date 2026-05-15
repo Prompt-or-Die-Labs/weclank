@@ -1,6 +1,6 @@
 // Per-user state + secrets storage. The renderer hands us the full
 // PersistedState JSON; we just upsert it. Secrets are namespaced by
-// `key_name` (e.g. 'openrouter', 'elevenlabs', 'suno', 'rtmp_url').
+// `key_name` (e.g. 'openrouter', 'elevenlabs', 'rtmp_url').
 
 import { openDb } from "./schema";
 

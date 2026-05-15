@@ -1,7 +1,7 @@
-// Manual music control panel. Generate a Suno track from a prompt, load
-// from a URL, adjust volume, stop. The agent has the same surface via its
-// tools; this is the dev's overrides for when they want to set the vibe
-// directly.
+// Manual music control panel. Generate an ElevenLabs track from a prompt,
+// load from a URL, adjust volume, stop. The agent has the same surface
+// via its tools; this is the dev's overrides for when they want to set
+// the vibe directly.
 
 import { Modal, toast } from "../components/overlays";
 import { musicPlayer } from "./music-player";
@@ -24,7 +24,7 @@ export function openMusicPanel(): void {
 		</label>
 
 		<details open>
-			<summary>Generate music (Suno)</summary>
+			<summary>Generate music (ElevenLabs)</summary>
 			<label class="tts-config__row">
 				<span>Prompt</span>
 				<input type="text" data-field="prompt" placeholder="lo-fi piano, mellow, 80 bpm" />
@@ -33,6 +33,7 @@ export function openMusicPanel(): void {
 				<input type="checkbox" data-field="instrumental" checked />
 				<span>Instrumental (recommended — vocals fight your voice)</span>
 			</label>
+			<div class="tts-config__hint">Uses your ElevenLabs API key (Voice settings). Music API requires an ElevenLabs paid plan.</div>
 			<div class="tts-config__actions">
 				<button type="button" data-action="generate" class="primary">Generate &amp; play</button>
 			</div>
@@ -87,7 +88,7 @@ export function openMusicPanel(): void {
 		if (!prompt) { promptEl.focus(); return; }
 		const btn = body.querySelector<HTMLButtonElement>("[data-action=generate]")!;
 		btn.disabled = true;
-		btn.textContent = "Generating (30-120s)…";
+		btn.textContent = "Generating…";
 		try {
 			const result = await generateMusic({ prompt, instrumental: instrumentalEl.checked });
 			await musicPlayer.playFromUrl(result.audioUrl, false);

@@ -1,10 +1,18 @@
-// LLM client for the banter engine — OpenRouter or OpenAI Chat Completions
-// (OpenAI-compatible JSON + tools). Keys come from the per-user secrets cache.
+// LLM client for the banter engine — OpenRouter, OpenAI Chat Completions,
+// or OpenAI Codex via ChatGPT OAuth (chatgpt.com/backend-api). All three
+// speak the OpenAI-compatible JSON + tools dialect. Keys/tokens come from
+// the per-user secrets cache; Codex tokens transparently refresh.
 // User message `content` may be a string or a multimodal array for vision.
 
 import { getStoredApiKey } from "../tts/registry";
 import { getSecret } from "../auth/secrets-cache";
 import { OPENAI_API_KEY } from "../auth/openai-api";
+import {
+	ensureCodexAccessToken,
+	chatgptAccountId,
+	isCodexConnected,
+} from "../auth/openai-codex-oauth";
+import { ELIZACLOUD_API_KEY } from "../auth/elizacloud-api";
 import { ApiError, ConfigError } from "../core/errors";
 import { withBackoff, isRetryableStatus } from "../core/retry";
 import type { BanterLlmProvider } from "../core/types";
@@ -56,32 +64,58 @@ interface OpenAIResponse {
 }
 
 export class LLMClient {
-	private readonly apiKey: string;
 	private readonly provider: BanterLlmProvider;
 	private readonly serviceLabel: string;
+	/** Static keys for `openai` + `openrouter`. For `openai-codex` this stays
+	 * empty and we resolve a fresh access token per request (refresh-aware). */
+	private readonly staticKey: string;
 
 	constructor(
 		private model: string,
 		opts?: { provider?: BanterLlmProvider },
 	) {
 		this.provider = opts?.provider ?? "openrouter";
-		this.apiKey =
-			this.provider === "openai"
-				? getSecret(OPENAI_API_KEY)
-				: getStoredApiKey("openrouter");
-		if (!this.apiKey) {
-			if (this.provider === "openai") {
-				throw new ConfigError(
-					"OpenAI API key required for this agent",
-					"Settings → AI Chat & Agents → Save OpenAI API key, or set the agent’s LLM provider back to OpenRouter.",
-				);
-			}
-			throw new ConfigError(
-				"OpenRouter API key required for banter engine",
-				"Add an OpenRouter API key in any agent's Voice settings — the banter engine reuses it when the LLM provider is OpenRouter.",
-			);
+		switch (this.provider) {
+			case "openai":
+				this.staticKey = getSecret(OPENAI_API_KEY);
+				this.serviceLabel = "OpenAI";
+				if (!this.staticKey) {
+					throw new ConfigError(
+						"OpenAI API key required for this agent",
+						"Settings → AI Chat & Agents → Save OpenAI API key, or set the agent’s LLM provider back to OpenRouter.",
+					);
+				}
+				break;
+			case "openai-codex":
+				this.staticKey = "";
+				this.serviceLabel = "ChatGPT (Codex)";
+				if (!isCodexConnected()) {
+					throw new ConfigError(
+						"ChatGPT (Codex) not connected",
+						"Settings → AI Chat & Agents → Connect ChatGPT (Codex), or change the agent's LLM provider.",
+					);
+				}
+				break;
+			case "elizacloud":
+				this.staticKey = getSecret(ELIZACLOUD_API_KEY);
+				this.serviceLabel = "Eliza Cloud";
+				if (!this.staticKey) {
+					throw new ConfigError(
+						"Eliza Cloud API key required",
+						"Settings → AI Chat & Agents → Connect Eliza Cloud, or change the agent's LLM provider.",
+					);
+				}
+				break;
+			default:
+				this.staticKey = getStoredApiKey("openrouter");
+				this.serviceLabel = "OpenRouter";
+				if (!this.staticKey) {
+					throw new ConfigError(
+						"OpenRouter API key required for banter engine",
+						"Add an OpenRouter API key in any agent's Voice settings — the banter engine reuses it when the LLM provider is OpenRouter.",
+					);
+				}
 		}
-		this.serviceLabel = this.provider === "openai" ? "OpenAI" : "OpenRouter";
 	}
 
 	async respond(messages: ChatTurn[], tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
@@ -96,18 +130,25 @@ export class LLMClient {
 			body["tool_choice"] = "auto";
 		}
 
-		const url =
-			this.provider === "openai"
-				? "https://api.openai.com/v1/chat/completions"
-				: "https://openrouter.ai/api/v1/chat/completions";
+		const url = pickEndpoint(this.provider);
+		const apiKey = this.provider === "openai-codex" ? await ensureCodexAccessToken() : this.staticKey;
 
 		const headers: Record<string, string> = {
-			Authorization: `Bearer ${this.apiKey}`,
+			Authorization: `Bearer ${apiKey}`,
 			"Content-Type": "application/json",
 		};
 		if (this.provider === "openrouter") {
 			headers["HTTP-Referer"] = "https://weclank.local";
 			headers["X-Title"] = "Weclank agent chat";
+		}
+		if (this.provider === "openai-codex") {
+			// ChatGPT backend expects the chatgpt_account_id from the id_token
+			// as a header. Also signal we're acting like the Codex CLI so the
+			// backend routes the request through the Codex stack.
+			const accountId = chatgptAccountId();
+			if (accountId) headers["chatgpt-account-id"] = accountId;
+			headers["OpenAI-Beta"] = "responses=experimental";
+			headers["originator"] = "codex_cli_rs";
 		}
 
 		const response = await withBackoff(
@@ -164,5 +205,19 @@ function parseArgs(raw: string): Record<string, unknown> {
 		return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
 	} catch {
 		return {};
+	}
+}
+
+function pickEndpoint(provider: BanterLlmProvider): string {
+	switch (provider) {
+		case "openai":
+			return "https://api.openai.com/v1/chat/completions";
+		case "openai-codex":
+			// ChatGPT backend speaks OpenAI Chat Completions at this path.
+			return "https://chatgpt.com/backend-api/codex/chat/completions";
+		case "elizacloud":
+			return "https://elizacloud.ai/api/v1/chat/completions";
+		default:
+			return "https://openrouter.ai/api/v1/chat/completions";
 	}
 }

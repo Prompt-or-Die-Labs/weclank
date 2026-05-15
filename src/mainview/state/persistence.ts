@@ -296,7 +296,6 @@ async function maybeMigrateLegacy(userId: string): Promise<Partial<StudioState> 
 		for (const lsKey of [
 			"studio.tts.elevenlabsApiKey",
 			"studio.tts.openrouterApiKey",
-			"studio.tts.sunoApiKey",
 		]) {
 			const v = localStorage.getItem(lsKey);
 			if (v) {

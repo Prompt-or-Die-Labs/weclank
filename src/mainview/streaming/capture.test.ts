@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { startBroadcastCapture, type BroadcastStreamSource } from "./capture";
+import { broadcastCapture, type BroadcastStreamSource, type CaptureSink } from "./capture";
 
 let activeRecorder: FakeMediaRecorder | null = null;
+let requestDataCalls = 0;
 
 class FakeMediaRecorder extends EventTarget {
 	static isTypeSupported(): boolean {
@@ -21,7 +22,9 @@ class FakeMediaRecorder extends EventTarget {
 		this.state = "recording";
 	}
 
-	requestData(): void {}
+	requestData(): void {
+		requestDataCalls += 1;
+	}
 
 	stop(): void {
 		this.state = "inactive";
@@ -37,22 +40,40 @@ class FakeMediaRecorder extends EventTarget {
 
 const originalMediaRecorder = globalThis.MediaRecorder;
 
-afterEach(() => {
+afterEach(async () => {
+	for (const id of broadcastCapture.attachedSinkIds) {
+		await broadcastCapture.detach(id);
+	}
 	activeRecorder = null;
+	requestDataCalls = 0;
 	if (originalMediaRecorder) {
 		Object.defineProperty(globalThis, "MediaRecorder", {
 			configurable: true,
+			writable: true,
 			value: originalMediaRecorder,
 		});
 	} else {
-		delete (globalThis as { MediaRecorder?: typeof MediaRecorder }).MediaRecorder;
+		Object.defineProperty(globalThis, "MediaRecorder", {
+			configurable: true,
+			writable: true,
+			value: undefined,
+		});
 	}
 });
 
-describe("startBroadcastCapture", () => {
-	test("waits for the final dataavailable event before stop resolves", async () => {
+function makeSink(opts: { id: string; onChunk?: (b: Blob) => void } = { id: "test" }): CaptureSink {
+	return {
+		id: opts.id,
+		onChunk: opts.onChunk ?? (() => {}),
+		onStop() {},
+	};
+}
+
+describe("broadcastCapture lifecycle", () => {
+	test("detach waits for the final dataavailable event before resolving", async () => {
 		Object.defineProperty(globalThis, "MediaRecorder", {
 			configurable: true,
+			writable: true,
 			value: FakeMediaRecorder,
 		});
 		const chunks: Blob[] = [];
@@ -63,30 +84,58 @@ describe("startBroadcastCapture", () => {
 			getOutputStream: () => new MediaStream(),
 		};
 
-		const session = startBroadcastCapture({
+		await broadcastCapture.attach(makeSink({ id: "drain", onChunk: (b) => chunks.push(b) }), {
 			source,
 			quality: "720p",
 			chunkIntervalMs: 5_000,
-			onChunk: (blob) => chunks.push(blob),
-			onError: () => {},
 		});
 		const recorder = activeRecorder;
 		if (!recorder) throw new Error("Fake recorder did not initialize");
 
-		let stopped = false;
-		const stopPromise = session.stop().then(() => {
-			stopped = true;
+		let detached = false;
+		const detachPromise = broadcastCapture.detach("drain").then(() => {
+			detached = true;
 		});
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
-		expect(stopped).toBe(false);
+		expect(detached).toBe(false);
 		expect(chunks).toHaveLength(0);
 
 		recorder.emitData();
-		await stopPromise;
+		await detachPromise;
 
-		expect(stopped).toBe(true);
+		expect(detached).toBe(true);
 		expect(chunks).toHaveLength(1);
 		expect(calls).toContainEqual([1280, 720]);
+	});
+
+	test("periodic flush calls requestData while recording and stops after detach", async () => {
+		Object.defineProperty(globalThis, "MediaRecorder", {
+			configurable: true,
+			writable: true,
+			value: FakeMediaRecorder,
+		});
+		const source: BroadcastStreamSource = {
+			setResolution: () => {},
+			setTargetFps: () => {},
+			getOutputStream: () => new MediaStream(),
+		};
+
+		await broadcastCapture.attach(makeSink({ id: "flush" }), {
+			source,
+			quality: "480p",
+			chunkIntervalMs: 10,
+		});
+		await new Promise((resolve) => setTimeout(resolve, 35));
+
+		expect(requestDataCalls).toBeGreaterThanOrEqual(2);
+
+		const detachPromise = broadcastCapture.detach("flush");
+		activeRecorder?.emitData();
+		await detachPromise;
+		const callsAfterStop = requestDataCalls;
+		await new Promise((resolve) => setTimeout(resolve, 25));
+
+		expect(requestDataCalls).toBe(callsAfterStop);
 	});
 });
