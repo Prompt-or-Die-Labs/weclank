@@ -242,19 +242,36 @@ function attachClassifierReader(proc: Bun.Subprocess<"pipe", "pipe", "pipe">, ne
 
 function handleLifecycleChange(s: EgressLifecycleState, next: EgressSession): void {
 	next.lifecycle = s;
-	// Surface lifecycle transitions as last-error so the renderer's
-	// toast pipeline catches them. Don't overwrite a more-specific
-	// classifier message (it has the same `at` precedence).
+	// The stderr classifier produces specific, actionable messages
+	// ("Connection refused", "401 Unauthorized", "Stream key invalid")
+	// that are far more useful to the user than a generic "reconnecting
+	// attempt 1". Only synthesize a lifecycle message when the
+	// classifier hasn't already produced one for THIS spawn — otherwise
+	// we'd overwrite "Stream key invalid" with the noise "ffmpeg exited
+	// code=137" (our own SIGKILL).
 	if (s.kind === "reconnecting") {
+		const classifierMsg = next.lastError?.message;
+		const generic = `Stream dropped — reconnecting (attempt ${s.attempt}).`;
+		// "ffmpeg exited code=137" is the supervisor's own SIGKILL —
+		// not informative on its own. Only fall back to the lifecycle's
+		// lastError if the classifier didn't say anything.
+		const causeIsOurKill = (s.lastError ?? "").includes("code=137");
 		next.lastError = {
-			message: `Stream dropped — reconnecting (attempt ${s.attempt}). ${s.lastError ?? ""}`.trim(),
+			message: classifierMsg && classifierMsg !== generic
+				? `${classifierMsg} (reconnect attempt ${s.attempt})`
+				: causeIsOurKill
+					? `Stream stalled — no data flowing. Check your RTMP URL + stream key (attempt ${s.attempt}).`
+					: `${generic} ${s.lastError ?? ""}`.trim(),
 			severity: "transient",
 			at: Date.now(),
 		};
-		console.warn(`[egress] reconnecting attempt=${s.attempt} cause="${s.lastError ?? ""}"`);
+		console.warn(`[egress] reconnecting attempt=${s.attempt} cause="${s.lastError ?? ""}" classifier="${classifierMsg ?? ""}"`);
 	} else if (s.kind === "failed") {
+		const classifierMsg = next.lastError?.message;
 		next.lastError = {
-			message: `Stream lost — couldn't reconnect (${s.lastError}). Stop and restart the broadcast.`,
+			message: classifierMsg
+				? `${classifierMsg} — gave up after retries. Stop and restart the broadcast.`
+				: `Stream lost — couldn't reconnect (${s.lastError}). Stop and restart the broadcast.`,
 			severity: "fatal",
 			at: Date.now(),
 		};
