@@ -12,7 +12,8 @@
 		"lint": "biome check src",
 		"format": "biome format --write src",
 		"check": "bunx tsc --noEmit && biome check src && bun test",
-		"build:omnivoice": "bun run scripts/build-omnivoice.mjs"
+		"build:omnivoice": "bun run scripts/build-omnivoice.mjs",
+		"build:icons": "bun run scripts/build-icons.ts"
 	},
 	"dependencies": {
 		"@pixiv/three-vrm": "^3.5.2",
